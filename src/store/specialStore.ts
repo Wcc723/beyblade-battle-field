@@ -6,7 +6,7 @@ import { reactive } from "vue";
 import type { SpecialConfig } from "../physics/types";
 import { DEFAULT_SPECIAL } from "../physics/engine";
 
-const KEY = "beyblade.special.v1";
+const KEY = "beyblade.special.v2";
 
 function load(): SpecialConfig {
   const base: SpecialConfig = { ...DEFAULT_SPECIAL };

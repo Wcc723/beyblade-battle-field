@@ -22,13 +22,15 @@ import { makeRng } from "./prng";
 
 /** 必殺技數值（集中可調，可被 SimConfig.special 覆寫） */
 export const DEFAULT_SPECIAL: SpecialConfig = {
-  chance: 0.2,
+  rushChance: 0.2,
   rushRange: 110,
   rushSpeed: 300,
   rushDamage: 320,
   rushCooldown: 2.0,
-  burstImpactMin: 170,
-  burstHpFrac: 0.38,
+  blastChance: 0.35,
+  blastImpactMin: 70,
+  blastPush: 360,
+  blastDamage: 300,
 };
 
 /** 血量（耐久條）基準：maxHp = HP_BASE × 重量 */
@@ -191,7 +193,7 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
   for (step = 1; step <= maxSteps; step++) {
     t = step * dt;
     integrate(bodies, arena, dt);
-    resolveCollisions(bodies, arena, sc, rng, step, t, specialEvents);
+    resolveCollisions(bodies, arena, sc, rng, t, specialEvents);
     resolveWalls(bodies, arena, step);
     applySpecials(bodies, sc, rng, t, specialEvents);
     checkDeaths(bodies, arena, step);
@@ -314,7 +316,6 @@ function resolveCollisions(
   arena: ArenaConfig,
   sc: SpecialConfig,
   rng: () => number,
-  step: number,
   t: number,
   events: SpecialEvent[],
 ): void {
@@ -394,19 +395,21 @@ function resolveCollisions(
       a.vz += pop;
       b.vz += pop;
 
-      // 必殺技【爆裂】：裝備者打出夠猛的一擊、且對手血量低 → 機率瞬殺對手
-      if (impact > sc.burstImpactMin) {
-        if (a.special === "burst" && b.alive && b.hp < sc.burstHpFrac * b.maxHp && rng() < sc.chance) {
-          b.alive = false;
-          b.deadAtStep = step;
-          b.deathReason = "burst";
-          events.push({ t, id: a.id, kind: "burst" });
+      // 必殺技【衝擊】：裝備者打出夠猛的一擊 → 機率把對手彈開一段距離 + 造成傷害
+      if (impact > sc.blastImpactMin) {
+        // a 衝擊 b：把 b 沿法線（遠離 a）方向彈開
+        if (a.special === "blast" && b.alive && rng() < sc.blastChance) {
+          b.vx += nx * sc.blastPush;
+          b.vy += ny * sc.blastPush;
+          b.hp -= sc.blastDamage;
+          events.push({ t, id: a.id, kind: "blast" });
         }
-        if (b.special === "burst" && a.alive && a.hp < sc.burstHpFrac * a.maxHp && rng() < sc.chance) {
-          a.alive = false;
-          a.deadAtStep = step;
-          a.deathReason = "burst";
-          events.push({ t, id: b.id, kind: "burst" });
+        // b 衝擊 a：把 a 沿 -法線（遠離 b）方向彈開
+        if (b.special === "blast" && a.alive && rng() < sc.blastChance) {
+          a.vx -= nx * sc.blastPush;
+          a.vy -= ny * sc.blastPush;
+          a.hp -= sc.blastDamage;
+          events.push({ t, id: b.id, kind: "blast" });
         }
       }
     }
@@ -437,7 +440,7 @@ function applySpecials(bodies: Body[], sc: SpecialConfig, rng: () => number, t: 
     const inRange = opp !== null && best < sc.rushRange;
     // 只在「剛進入射程」且過了冷卻時擲骰
     if (inRange && opp && !b.prevInRange && t >= b.rushReadyT) {
-      if (rng() < sc.chance) {
+      if (rng() < sc.rushChance) {
         const dx = opp.px - b.px;
         const dy = opp.py - b.py;
         const d = Math.hypot(dx, dy) || 1e-6;

@@ -119,7 +119,7 @@ export interface Frame {
 }
 
 /** 必殺技種類（空字串/未設 = 無） */
-export type SpecialKind = "rush" | "burst";
+export type SpecialKind = "rush" | "blast";
 
 /** 必殺技發動事件（供回放特效用） */
 export interface SpecialEvent {
@@ -128,25 +128,29 @@ export interface SpecialEvent {
   kind: SpecialKind;
 }
 
-/** 必殺技數值（集中可調） */
+/** 必殺技數值（集中可調，每招獨立設定） */
 export interface SpecialConfig {
-  /** 觸發機率 0~1 */
-  chance: number;
+  /** 衝刺：觸發機率 0~1 */
+  rushChance: number;
   /** 衝刺：進入此距離才可能觸發 */
   rushRange: number;
   /** 衝刺：朝對手爆發加速量 */
   rushSpeed: number;
-  /** 衝刺：命中時直接扣對手自旋（血量）的傷害 */
+  /** 衝刺：命中時直接扣對手血量的傷害 */
   rushDamage: number;
   /** 衝刺：發動後冷卻秒數 */
   rushCooldown: number;
-  /** 爆裂：撞擊強度門檻 */
-  burstImpactMin: number;
-  /** 爆裂：對手血量低於此比例才可能被爆 */
-  burstHpFrac: number;
+  /** 衝擊：觸發機率 0~1 */
+  blastChance: number;
+  /** 衝擊：撞擊強度門檻（夠猛的一擊才觸發） */
+  blastImpactMin: number;
+  /** 衝擊：把對手彈開的速度量 */
+  blastPush: number;
+  /** 衝擊：對對手造成的血量傷害 */
+  blastDamage: number;
 }
 
-export type WinReason = "ring-out" | "spin-out" | "timeout" | "draw" | "burst" | "ko";
+export type WinReason = "ring-out" | "spin-out" | "timeout" | "draw" | "ko";
 
 /** 一場對戰的完整結果（伺服器算完後推播給前端的內容） */
 export interface SimResult {

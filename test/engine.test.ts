@@ -251,33 +251,32 @@ describe("2.5D 彈跳 (jump)", () => {
 });
 
 describe("必殺技 (specials)", () => {
-  it("爆裂：裝備者猛擊低血對手 → 機率性瞬殺（同 seed 確定）", () => {
+  it("衝擊：猛擊機率把對手彈開 + 扣血（記錄事件、同 seed 確定）", () => {
     const mk = (seed: number) =>
       simulate(
         [
-          body({ id: "A", position: { x: -15, y: 0 }, velocity: { x: 300, y: 0 }, spin: 1e6, radius: 20, special: "burst" }),
-          body({ id: "B", position: { x: 15, y: 0 }, velocity: { x: -300, y: 0 }, spin: 100, radius: 20 }),
+          body({ id: "A", position: { x: -15, y: 0 }, velocity: { x: 300, y: 0 }, spin: 1e6, radius: 20, special: "blast" }),
+          body({ id: "B", position: { x: 15, y: 0 }, velocity: { x: -300, y: 0 }, spin: 1e6, radius: 20 }),
         ],
-        { dt: 1 / 60, maxTime: 1, arena: neutralArena({ restitution: 0.5, radius: 5000 }), seed, special: { burstHpFrac: 2 } },
+        { dt: 1 / 60, maxTime: 1, arena: neutralArena({ restitution: 0.5, radius: 1e6 }), seed },
       );
-    let bursts = 0;
+    let fired = 0;
     const N = 60;
-    for (let s = 1; s <= N; s++) if (mk(s).reason === "burst") bursts++;
-    expect(bursts).toBeGreaterThan(0); // 有觸發
-    expect(bursts).toBeLessThan(N); // 機率性，非必中
-    // 同 seed → 完全一致
-    expect(JSON.stringify(mk(7))).toBe(JSON.stringify(mk(7)));
+    for (let s = 1; s <= N; s++) if (mk(s).specialEvents.some((e) => e.kind === "blast" && e.id === "A")) fired++;
+    expect(fired).toBeGreaterThan(0); // 有觸發
+    expect(fired).toBeLessThan(N); // 機率性，非必中
+    expect(JSON.stringify(mk(7))).toBe(JSON.stringify(mk(7))); // 同 seed 一致
   });
 
-  it("爆裂：未裝備時永不爆裂", () => {
+  it("衝擊：未裝備時不觸發", () => {
     const r = simulate(
       [
         body({ id: "A", position: { x: -15, y: 0 }, velocity: { x: 300, y: 0 }, spin: 1e6, radius: 20 }),
-        body({ id: "B", position: { x: 15, y: 0 }, velocity: { x: -300, y: 0 }, spin: 100, radius: 20 }),
+        body({ id: "B", position: { x: 15, y: 0 }, velocity: { x: -300, y: 0 }, spin: 1e6, radius: 20 }),
       ],
-      { dt: 1 / 60, maxTime: 1, arena: neutralArena({ restitution: 0.5, radius: 5000 }), seed: 3 },
+      { dt: 1 / 60, maxTime: 1, arena: neutralArena({ restitution: 0.5, radius: 1e6 }), seed: 3 },
     );
-    expect(r.reason).not.toBe("burst");
+    expect(r.specialEvents.some((e) => e.kind === "blast")).toBe(false);
   });
 
   it("衝刺突進：逼近對手時機率觸發並記錄事件", () => {

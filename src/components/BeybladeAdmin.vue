@@ -6,14 +6,19 @@ import { special, persistSpecial, resetSpecial } from "../store/specialStore";
 
 defineEmits<{ (e: "go-battle"): void }>();
 
-const SPECIAL_FIELDS: { key: keyof SpecialConfig; label: string; min: number; max: number; step: number }[] = [
-  { key: "chance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
-  { key: "rushDamage", label: "衝刺傷害", min: 0, max: 1200, step: 50 },
-  { key: "rushSpeed", label: "衝刺加速", min: 0, max: 600, step: 20 },
-  { key: "rushRange", label: "衝刺距離", min: 40, max: 250, step: 10 },
-  { key: "rushCooldown", label: "衝刺冷卻", min: 0.5, max: 5, step: 0.25 },
-  { key: "burstImpactMin", label: "爆裂門檻", min: 50, max: 400, step: 10 },
-  { key: "burstHpFrac", label: "爆裂血量線", min: 0, max: 0.8, step: 0.02 },
+type SpField = { key: keyof SpecialConfig; label: string; min: number; max: number; step: number };
+const RUSH_FIELDS: SpField[] = [
+  { key: "rushChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
+  { key: "rushDamage", label: "傷害", min: 0, max: 1200, step: 50 },
+  { key: "rushSpeed", label: "加速量", min: 0, max: 600, step: 20 },
+  { key: "rushRange", label: "觸發距離", min: 40, max: 250, step: 10 },
+  { key: "rushCooldown", label: "冷卻(秒)", min: 0.5, max: 5, step: 0.25 },
+];
+const BLAST_FIELDS: SpField[] = [
+  { key: "blastChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
+  { key: "blastDamage", label: "傷害", min: 0, max: 1000, step: 50 },
+  { key: "blastPush", label: "彈開力道", min: 0, max: 700, step: 20 },
+  { key: "blastImpactMin", label: "撞擊門檻", min: 50, max: 400, step: 10 },
 ];
 function onSpecial() {
   persistSpecial();
@@ -70,17 +75,30 @@ function onInput() {
       </div>
     </div>
 
-    <div class="special-card">
-      <div class="type-head">
-        <h3>⚡ 必殺技數值</h3>
-        <button class="reset" @click="resetSpecial">還原預設</button>
+    <div class="special-head">
+      <h3>⚡ 必殺技數值（每招分開設定）</h3>
+      <button class="reset" @click="resetSpecial">還原預設</button>
+    </div>
+    <div class="special-grid">
+      <div class="special-card">
+        <h4>🗡️ 衝刺突進</h4>
+        <p class="sp-hint">逼近對手時機率發動：朝對手爆發加速 + 直接扣血。</p>
+        <div class="sp-grid">
+          <label v-for="f in RUSH_FIELDS" :key="f.key" class="field">
+            <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
+            <input type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="special[f.key]" @input="onSpecial" />
+          </label>
+        </div>
       </div>
-      <p class="sp-hint">衝刺突進＝逼近時加速 + 直接扣血；爆裂＝猛擊低血對手機率瞬殺。改動即時生效。</p>
-      <div class="sp-grid">
-        <label v-for="f in SPECIAL_FIELDS" :key="f.key" class="field">
-          <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
-          <input type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="special[f.key]" @input="onSpecial" />
-        </label>
+      <div class="special-card">
+        <h4>💥 衝擊</h4>
+        <p class="sp-hint">打出夠猛的一擊時，機率把對手彈開一段距離 + 造成傷害（可順勢擊出界）。</p>
+        <div class="sp-grid">
+          <label v-for="f in BLAST_FIELDS" :key="f.key" class="field">
+            <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
+            <input type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="special[f.key]" @input="onSpecial" />
+          </label>
+        </div>
       </div>
     </div>
 

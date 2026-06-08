@@ -21,7 +21,7 @@ interface Setup {
   special: "" | SpecialKind;
 }
 const setupA = reactive<Setup>({ id: "A", color: "#ff5d5d", preset: "balance", spinDir: 1, special: "rush" });
-const setupB = reactive<Setup>({ id: "B", color: "#5db4ff", preset: "attack", spinDir: -1, special: "burst" });
+const setupB = reactive<Setup>({ id: "B", color: "#5db4ff", preset: "attack", spinDir: -1, special: "blast" });
 const presetKeys = Object.keys(STAT_PRESETS);
 
 /* ---------- 對戰流程狀態機 ---------- */
@@ -59,7 +59,7 @@ function pocketPoints(angle: number | null): number {
 }
 function roundPoints(r: SimResult): number {
   if (!r.winnerId) return 0;
-  if (r.reason === "burst" || r.reason === "ko") return 2;
+  if (r.reason === "ko") return 2;
   if (r.reason === "ring-out") return pocketPoints(r.ringOutAngle);
   if (r.reason === "spin-out" || r.reason === "timeout") return 1;
   return 0;
@@ -107,7 +107,7 @@ const dragCurrent = reactive({ x: 0, y: 0 });
 
 // 發射模式：flick = 甩動（看放手瞬間拖曳速度）、sling = 拉弓（看拉的距離）
 const launchMode = ref<"flick" | "sling">("flick");
-const V_FULL = 2500; // 甩動：達到全力的世界單位/秒（越小越靈敏）
+const V_FULL = 5200; // 甩動：達到全力的甩速（越大越能分辨快慢；太小會一甩就爆表）
 let samples: { cx: number; cy: number; t: number }[] = [];
 let pxToWorld = 1; // 螢幕像素 → 世界單位的換算（pointerdown 時計算）
 
@@ -584,7 +584,7 @@ function draw() {
       if (!fb) continue;
       const [ex, ey] = toCanvas(fb.x, fb.y);
       const prog = dtv / 0.5;
-      const ecol = ev.kind === "burst" ? "#ffce4d" : colorOf(ev.id);
+      const ecol = ev.kind === "blast" ? "#ffce4d" : colorOf(ev.id);
       g.save();
       g.globalAlpha = 1 - prog;
       g.strokeStyle = ecol;
@@ -595,7 +595,7 @@ function draw() {
       g.fillStyle = ecol;
       g.font = "bold 20px system-ui";
       g.textAlign = "center";
-      g.fillText(ev.kind === "burst" ? "爆裂!" : "突進!", ex, ey - scaleLen(26) - 16 - prog * 28);
+      g.fillText(ev.kind === "blast" ? "衝擊!" : "突進!", ex, ey - scaleLen(26) - 16 - prog * 28);
       g.restore();
     }
     return;
@@ -694,7 +694,6 @@ const reasonText: Record<string, string> = {
   "spin-out": "停轉",
   timeout: "時間到（比體力）",
   draw: "平手",
-  burst: "爆裂",
   ko: "擊破",
 };
 function roundResultLabel(): string {
@@ -752,7 +751,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
           <select v-model="setupA.special" :disabled="!!launchA">
             <option value="">無</option>
             <option value="rush">衝刺突進</option>
-            <option value="burst">爆裂</option>
+            <option value="blast">衝擊</option>
           </select>
         </label>
       </div>
@@ -774,7 +773,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
           <select v-model="setupB.special" :disabled="!!launchB">
             <option value="">無</option>
             <option value="rush">衝刺突進</option>
-            <option value="burst">爆裂</option>
+            <option value="blast">衝擊</option>
           </select>
         </label>
       </div>
