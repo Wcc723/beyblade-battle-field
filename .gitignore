@@ -1,0 +1,10 @@
+# 依賴與建置產物
+node_modules/
+dist/
+
+# 美術中間檔（codex 原始 PNG / 去背 PNG，可重新處理；最終 WebP 在 public/beyblades/）
+art/
+
+# 系統 / 雜項
+.DS_Store
+*.log

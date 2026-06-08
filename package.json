@@ -1,0 +1,25 @@
+{
+  "name": "beyblade-arena",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "網頁版戰鬥陀螺 — 物理引擎原型 (Vite + Vue)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "balance": "vitest run -c vitest.balance.config.ts"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^3.0.5",
+    "vue-tsc": "^2.2.0"
+  }
+}
