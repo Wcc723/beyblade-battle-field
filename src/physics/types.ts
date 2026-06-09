@@ -46,6 +46,126 @@ export interface BeybladeInit {
   special?: SpecialKind;
 }
 
+/**
+ * 護牆分區（P1）：對「邊緣某個角度範圍」覆寫護牆特性。
+ * 未被任何段涵蓋的角度 = 一般護牆（用 arena 的全域 wallBounce / ringOutSpeed）。
+ * 角度為世界座標弧度（+y 朝上為 +π/2），段涵蓋 [angle - half, angle + half]。
+ */
+export interface RimSegment {
+  /** 段中心角（世界座標弧度） */
+  angle: number;
+  /** 段半寬（弧度） */
+  half: number;
+  /**
+   * 類型（決定預設值與視覺）：
+   *  - wall   一般牆（score 1，物理同全域）
+   *  - pocket 高分區（score 2，物理同一般牆 → 相容舊「缺口只計分」）
+   *  - break  真·物理破口（ringOutSpeed 預設 0：一碰邊就出界，score 2）
+   * 預設 wall。
+   */
+  kind?: "wall" | "pocket" | "break";
+  /** 反彈係數覆寫（未設依 kind 預設 → 全域 wallBounce） */
+  wallBounce?: number;
+  /** 出界門檻覆寫（未設依 kind 預設：wall/pocket=全域、break=0） */
+  ringOutSpeed?: number;
+  /** 從此段飛出的計分（未設依 kind 預設：wall=1、pocket/break=2） */
+  score?: number;
+}
+
+/**
+ * 加速軌道（Beyblade X 的「Xtreme Line / 綠色軌道」）。
+ * 陀螺中心落在 radius ± band 的環帶上時，沿自旋方向獲得切向加速（越轉越猛），
+ * 並可額外被拉向中心 → 更容易加速、撞更兇，但本身不會把陀螺推出場。
+ */
+export interface AcceleratorRail {
+  /** 軌道半徑（陀螺中心離原點的距離） */
+  radius: number;
+  /** 軌道作用半寬：|dist - radius| ≤ band 才生效 */
+  band: number;
+  /** 切向加速度（沿自旋方向），實際施加量 ∝ 自旋比例 */
+  boost: number;
+  /** 上軌時額外的向心加速（把陀螺拉向中心 → 撞向對手）。可選 */
+  inward?: number;
+  /** 上軌最低自旋比例門檻 0~1（太慢上不了軌）。可選，預設 0 */
+  minSpin?: number;
+}
+
+/**
+ * 方形邊界（Beyblade X 風正方形場）。設了 box → 邊界改用「軸對齊方框」而非圓：
+ *  - 四條邊（上下左右）= 會反彈的牆：垂直分量反彈、切向分量保留 → 斜撞會沿牆滑向角落。
+ *  - 四個角 = 出界口：被推進角落開口即 Ring-out。
+ * 未設 = 沿用圓形邊界（radius + rim），既有場地不受影響。
+ */
+export interface BoxBoundary {
+  /** 半邊長：場地中心到邊的距離（x/y 對稱的正方形） */
+  half: number;
+  /** 角落開口大小：從角往兩邊各延伸這麼長的範圍沒有牆 → 可摔出去 */
+  cornerGap: number;
+  /** 邊牆反彈係數（未設用 arena.wallBounce） */
+  wallBounce?: number;
+  /** 從角落摔出的計分（未設 2） */
+  cornerScore?: number;
+}
+
+/**
+ * 綠色內牆（Beyblade X「Xtreme Line」M 形）。一條閉合曲線，做為「box 的內層實體牆」：
+ *  - 形狀：手繪 M —— 基準圓 radius 的外圈大弧 + 兩條從接縫「相切」到圓拱頂的直線腿 + 兩個外凸圓拱
+ *    + 頂端兩拱間的水平凹底線段（凹口在 topAngle）。為星形曲線，仍以 r(θ) 介面供查詢。
+ *  - 實體牆：陀螺撞牆沿「界線段外法線」反彈、保留切向（沿牆滑）；**只在貼地（z ≤ wallHeight）時阻擋**。
+ *  - 越牆（唯一出綠框的方式）：被碰撞**擊飛到空中**（z > wallHeight）→ 飛越綠牆進「外圈」，交給方框 box（飛到四角才出界 / 撞四邊反彈）。
+ *  - 頂部加速區（Xtreme Dash）：凹口弧段內、夠快的陀螺獲得切向爆發 + 沿內法線向心拉。
+ * 引擎（碰撞）與 ArenaSvg（描繪）共用 src/physics/arena.ts 的同一份 M 形界線（sampleSoftWall）→ 畫面與物理同源。
+ * 未設（undefined）= 無內牆，既有場地完全不受影響。所有欄位除 radius 外皆可選。
+ */
+export interface SoftWall {
+  /** 中心線基準半徑（world）。 */
+  radius: number;
+  /** 牆視覺半厚（world，描邊寬用；不影響碰撞接觸點）。預設 16。 */
+  bandHalf?: number;
+  /** 凹口中心角（world 弧度）。預設 +π/2（正上方）。 */
+  topAngle?: number;
+  /* —— M 形手繪幾何（直腿相切圓弧拱 + 水平凹底）；比例相對 radius，未設用手繪定案預設 —— */
+  /** 圓拱半徑（相對 radius）。預設 ≈0.404。 */
+  crownRadius?: number;
+  /** 圓拱圓心離中軸 x 偏移（相對 radius）。預設 ≈0.263。 */
+  crownSep?: number;
+  /** 圓拱圓心往凹口方向的高（相對 radius）。預設 ≈0.667。 */
+  crownHeight?: number;
+  /** 外圈接縫離凹口中心半張角（弧度，腿從此相切到圓拱）。預設 ≈0.942（54°）。 */
+  seamAngle?: number;
+  /** 頂端水平凹底線段半長（相對 radius，~5% 直徑）。預設 0.05。 */
+  notchHalf?: number;
+  /* —— 以下舊 r(θ) raised-cosine 參數已停用（改手繪 M 後不生效），保留僅為相容舊存檔 —— */
+  /** @deprecated 舊 r(θ) 谷底平段半張角（已停用）。 */
+  valleyFlatHalf?: number;
+  /** @deprecated 舊 r(θ) 谷底圓肩半張角（已停用）。 */
+  valleyShoulder?: number;
+  /** @deprecated 舊 r(θ) 谷底內凹深度（已停用）。 */
+  depth?: number;
+  /** @deprecated 舊 r(θ) 拱峰中心半張角（已停用）。 */
+  archCenter?: number;
+  /** @deprecated 舊 r(θ) 拱峰半寬（已停用）。 */
+  archHalf?: number;
+  /** @deprecated 舊 r(θ) 拱峰外凸比例（已停用）。 */
+  archLift?: number;
+  /** 實體牆反彈係數 0~1。預設 arena.wallBounce。 */
+  wallBounce?: number;
+  /** 撞牆扣自旋係數。預設 arena.wallSpinLoss。 */
+  spinLoss?: number;
+  /** 綠牆「高度」：陀螺 z 超過此值才能飛越綠牆（被擊飛才出得去）。預設 20。 */
+  wallHeight?: number;
+  /** @deprecated 舊「軟牆半透膜」越牆門檻（已停用，改為實體牆 + 擊飛越牆）。 */
+  passThroughSpeed?: number;
+  /** 頂部加速區半張角。預設 archCenter + archHalf（涵蓋整個凹口）。 */
+  accelHalf?: number;
+  /** 切向加速量 ∝ 自旋（0 或未設 = 無加速區）。 */
+  accelBoost?: number;
+  /** 沿真實內法線的向心拉（funnel 主力）。預設 70。 */
+  accelInward?: number;
+  /** 加速區最低自旋比例門檻 0~1。預設 0.12。 */
+  accelMinSpin?: number;
+}
+
 /** 場地（碗形 stadium）參數 —— 決定整體手感，原型可即時調 */
 export interface ArenaConfig {
   /** 出界邊界半徑：陀螺中心離原點超過此值即 Ring-out */
@@ -82,6 +202,18 @@ export interface ArenaConfig {
   jumpOverHeight: number;
   /** 血量基準（耐久條）：每顆 maxHp = hpBase × 重量。可選，未設用引擎預設 HP_BASE */
   hpBase?: number;
+  /**
+   * 邊緣分區（P1）：每段可獨立設定反彈 / 出界門檻 / 計分。
+   * 未設（undefined）= 相容舊行為：上(+y)、下(-y) 兩個高分缺口（半寬 0.42、計分 2、物理同牆）。
+   * 設為 [] = 整圈無任何分區（一般牆、出界皆 1 分）。可選。
+   */
+  rim?: RimSegment[];
+  /** 加速軌道（Xtreme Line）。未設 = 無軌道（不影響既有場地）。可選。 */
+  rail?: AcceleratorRail;
+  /** 方形邊界（四角出界、四邊反彈）。設了就改用方框邊界、忽略圓形 rim 邊界。可選。 */
+  box?: BoxBoundary;
+  /** 綠色軟牆（M 形 Xtreme Line + 頂部加速區），內層半透膜。未設 = 無（不影響既有場地）。可選。 */
+  softWall?: SoftWall;
 }
 
 export interface SimConfig {

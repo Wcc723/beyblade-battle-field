@@ -5,12 +5,16 @@
  */
 import { ref } from "vue";
 import type { ArenaConfig } from "../physics/types";
-import { DEFAULT_ARENA } from "../physics/engine";
+import { DEFAULT_ARENA, XTREME_STADIUM } from "../physics/engine";
 
 export interface ArenaPreset {
   id: string;
   name: string;
   config: ArenaConfig;
+  /** 是否為內建示範場（程式碼植入）。 */
+  builtin?: boolean;
+  /** 使用者是否改過此場：改過後內建場就不再被程式碼覆寫（編輯才能正確保存）。 */
+  userEdited?: boolean;
 }
 
 const KEY = "beyblade.arenas.v1";
@@ -67,6 +71,7 @@ export function updatePreset(id: string, name: string, config: ArenaConfig): voi
   if (!p) return;
   p.name = name.trim() || p.name;
   p.config = { ...config };
+  p.userEdited = true; // 標記使用者改過 → 內建場不再被程式碼覆寫
   persist();
 }
 
@@ -89,7 +94,47 @@ export function activePresetName(): string {
   return getActivePreset()?.name ?? "預設場地";
 }
 
+/** 內建示範場登錄表（程式碼為來源）。 */
+const BUILTINS: { name: string; config: ArenaConfig }[] = [
+  { name: "Beyblade X · Xtreme Stadium", config: XTREME_STADIUM },
+];
+
+/**
+ * 內建場同步（冪等）：
+ *  - 不存在 → 新增（標記 builtin）。
+ *  - 已存在但「使用者沒改過」→ 用最新程式碼覆寫（未動過的內建場自動跟上 code）。
+ *  - 已存在且「使用者改過」(userEdited) → 保留使用者版本、不覆寫 → 編輯能正確保存。
+ * 想還原原廠：用 resetBuiltin（或刪除後 reload 會重新植入乾淨版）。
+ */
+function ensureBuiltin(name: string, config: ArenaConfig): void {
+  const existing = presets.value.find((p) => p.name === name);
+  if (existing) {
+    existing.builtin = true;
+    if (!existing.userEdited) {
+      existing.config = { ...config };
+      persist();
+    }
+  } else {
+    const p = addPreset(name, config);
+    p.builtin = true;
+    persist();
+  }
+}
+
+/** 把某個內建場還原成程式碼原廠值（清掉 userEdited，之後又會跟著 code 同步）。 */
+export function resetBuiltin(id: string): void {
+  const p = presets.value.find((x) => x.id === id);
+  if (!p) return;
+  const b = BUILTINS.find((x) => x.name === p.name);
+  if (!b) return;
+  p.config = { ...b.config };
+  p.userEdited = false;
+  persist();
+}
+
 // 首次使用：種一組預設場地，確保一定有可套用的設定
 if (presets.value.length === 0) {
   addPreset("預設場地", DEFAULT_ARENA);
 }
+// 內建示範場（使用者改過的不會被覆寫）
+for (const b of BUILTINS) ensureBuiltin(b.name, b.config);

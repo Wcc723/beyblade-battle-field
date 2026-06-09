@@ -3,7 +3,9 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { simulate, DEFAULT_SCALES, maxHpFor } from "../physics/engine";
 import type { ArenaConfig, BeybladeInit, Frame, SimResult, SpecialKind } from "../physics/types";
 import { STAT_PRESETS, PRESET_LABELS } from "../physics/presets";
-import { getActiveConfig, activePresetName } from "../store/arenaStore";
+import { getActiveConfig, activePresetName, presets, activeId, setActive } from "../store/arenaStore";
+import { rimScoreAt } from "../physics/arena";
+import ArenaSvg from "./ArenaSvg.vue";
 import { getStats } from "../store/statStore";
 import { special } from "../store/specialStore";
 
@@ -45,22 +47,15 @@ const roundScored = ref(false);
 const lastRoundPoints = ref(0);
 const matchOver = computed(() => scoreA.value >= WIN_SCORE || scoreB.value >= WIN_SCORE);
 
-// 護牆缺口（高分區）：世界角度 上(+y) / 下(-y)，半寬內出界 = 2 分
-const POCKET_ANGLES = [Math.PI / 2, -Math.PI / 2];
-const POCKET_HALF = 0.42;
-function pocketPoints(angle: number | null): number {
-  if (angle == null || !Number.isFinite(angle)) return 1;
-  for (const pa of POCKET_ANGLES) {
-    let d = Math.abs(angle - pa);
-    d = Math.min(d, Math.PI * 2 - d);
-    if (d < POCKET_HALF) return 2;
-  }
-  return 1;
-}
+// 出界計分依場地「邊緣分區」資料（rimScoreAt）：落在高分區/破口的角度 = 該段 score
 function roundPoints(r: SimResult): number {
   if (!r.winnerId) return 0;
   if (r.reason === "ko") return 2;
-  if (r.reason === "ring-out") return pocketPoints(r.ringOutAngle);
+  if (r.reason === "ring-out") {
+    // 方形場：四角出界統一用 box.cornerScore；圓形場：依 rim 落點分區
+    if (arena.value.box) return arena.value.box.cornerScore ?? 2;
+    return rimScoreAt(arena.value, r.ringOutAngle);
+  }
   if (r.reason === "spin-out" || r.reason === "timeout") return 1;
   return 0;
 }
@@ -82,7 +77,7 @@ function awardRound() {
 const result = ref<SimResult | null>(null);
 const playhead = ref(0);
 const playing = ref(false);
-const speed = ref(1);
+const speed = ref(2); // 回放預設 2 倍速（只影響播放，不動模擬 timestep；終結慢動作 ×0.3 仍照比例放慢）
 
 /* ---------- 畫布 / 拖曳 ---------- */
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -118,14 +113,18 @@ const hintText = computed(() =>
 );
 
 /* ---------- 座標轉換 ---------- */
+// 縮放基準：方形場用半邊長 box.half、圓形場用 radius（讓場地剛好填滿畫布）
+function scaleRef(): number {
+  return arena.value.box ? arena.value.box.half : arena.value.radius;
+}
 function toCanvas(x: number, y: number): [number, number] {
   const pad = 28;
-  const scale = (SIZE / 2 - pad) / arena.value.radius;
+  const scale = (SIZE / 2 - pad) / scaleRef();
   return [SIZE / 2 + x * scale, SIZE / 2 - y * scale];
 }
 function scaleLen(v: number): number {
   const pad = 28;
-  return v * ((SIZE / 2 - pad) / arena.value.radius);
+  return v * ((SIZE / 2 - pad) / scaleRef());
 }
 function clientToWorld(e: PointerEvent): { x: number; y: number } {
   const el = canvas.value!;
@@ -133,12 +132,12 @@ function clientToWorld(e: PointerEvent): { x: number; y: number } {
   const sx = (e.clientX - rect.left) * (SIZE / rect.width);
   const sy = (e.clientY - rect.top) * (SIZE / rect.height);
   const pad = 28;
-  const scale = (SIZE / 2 - pad) / arena.value.radius;
+  const scale = (SIZE / 2 - pad) / scaleRef();
   let x = (sx - SIZE / 2) / scale;
   let y = (SIZE / 2 - sy) / scale;
   // 限制落點在場內
   const r = Math.hypot(x, y);
-  const lim = arena.value.radius * 0.92;
+  const lim = scaleRef() * 0.9;
   if (r > lim) {
     x = (x / r) * lim;
     y = (y / r) * lim;
@@ -374,53 +373,12 @@ watch(playhead, () => {
 });
 
 /* ---------- 繪製 ---------- */
+// 場地（外框/碗/綠軌/出口）已改由底層的 ArenaSvg 向量圖層畫（吃同一份場地資料 → 與碰撞同源）。
+// canvas 只保持透明、回傳幾何讓上層畫會動的陀螺與特效。
 function drawArena(g: CanvasRenderingContext2D): { cx: number; cy: number; R: number } {
   g.clearRect(0, 0, SIZE, SIZE);
-  g.fillStyle = "#0b0e13";
-  g.fillRect(0, 0, SIZE, SIZE);
   const [cx, cy] = toCanvas(0, 0);
   const R = scaleLen(arena.value.radius);
-  for (let i = 5; i >= 1; i--) {
-    g.beginPath();
-    g.arc(cx, cy, (R * i) / 5, 0, Math.PI * 2);
-    g.fillStyle = i % 2 === 0 ? "#141a24" : "#10151d";
-    g.fill();
-  }
-  g.beginPath();
-  g.arc(cx, cy, R - 6, 0, Math.PI * 2);
-  g.lineWidth = 12;
-  g.strokeStyle = "rgba(255,93,93,0.10)";
-  g.stroke();
-  g.beginPath();
-  g.arc(cx, cy, R, 0, Math.PI * 2);
-  g.lineWidth = 7;
-  g.strokeStyle = "#7d8aa8";
-  g.stroke();
-  g.beginPath();
-  g.arc(cx, cy, R, 0, Math.PI * 2);
-  g.lineWidth = 2;
-  g.strokeStyle = "#aab6d4";
-  g.stroke();
-
-  // 護牆缺口（高分區 2 分）：金色粗弧 + 2× 標記。世界角度 → 畫布角度為 -θ
-  for (const pa of POCKET_ANGLES) {
-    const ca = -pa;
-    g.save();
-    g.beginPath();
-    g.arc(cx, cy, R, ca - POCKET_HALF, ca + POCKET_HALF);
-    g.lineWidth = 9;
-    g.strokeStyle = "#ffd166";
-    g.shadowColor = "#ffd166";
-    g.shadowBlur = 10;
-    g.stroke();
-    g.restore();
-    g.save();
-    g.fillStyle = "#ffd166";
-    g.font = "bold 13px system-ui";
-    g.textAlign = "center";
-    g.fillText("2×", cx + Math.cos(ca) * (R - 20), cy + Math.sin(ca) * (R - 20) + 4);
-    g.restore();
-  }
   return { cx, cy, R };
 }
 
@@ -711,6 +669,14 @@ function isFinished(): boolean {
   return !!frames && !playing.value && Math.round(playhead.value) >= frames.length - 1;
 }
 
+/** 對戰場直接切換場地（含綠牆場 / 一般場）→ 套用並重開一局。 */
+function selectArena(e: Event) {
+  setActive((e.target as HTMLSelectElement).value);
+  arena.value = getActiveConfig();
+  arenaName.value = activePresetName();
+  resetMatch();
+}
+
 /* ---------- 生命週期 ---------- */
 onMounted(() => {
   if (canvas.value) ctx = canvas.value.getContext("2d");
@@ -778,7 +744,11 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
         </label>
       </div>
 
-      <div class="arena-info">場地：<b>{{ arenaName }}</b></div>
+      <label class="arena-info">場地：
+        <select class="arena-select" :value="activeId" @change="selectArena">
+          <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
+      </label>
       <button class="reset-btn" @click="resetMatch">↺ 重新對戰</button>
       <p class="hint">{{ hintText }}</p>
     </div>
@@ -808,6 +778,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
       </div>
 
       <div class="canvas-wrap">
+        <ArenaSvg :arena="arena" />
         <canvas
           ref="canvas"
           :width="SIZE"
@@ -833,6 +804,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
           <option :value="0.5">0.5x</option>
           <option :value="1">1x</option>
           <option :value="2">2x</option>
+          <option :value="3">3x</option>
         </select>
         <button v-if="matchOver" class="again" @click="resetMatch">🔄 重新比賽</button>
         <button v-else class="again" @click="nextRound">下一回合 →</button>
@@ -930,12 +902,26 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
   opacity: 0.55;
 }
 .arena-info {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 13px;
   color: var(--muted);
   padding: 4px 2px;
 }
 .arena-info b {
   color: var(--text);
+}
+.arena-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 13px;
+  cursor: pointer;
 }
 .reset-btn {
   background: var(--panel-2);
@@ -1025,11 +1011,14 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
   max-width: 100%;
 }
 canvas {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: auto;
   border-radius: 16px;
   border: 1px solid var(--line);
   display: block;
+  background: transparent;
   touch-action: none;
   cursor: crosshair;
 }

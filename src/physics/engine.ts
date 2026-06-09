@@ -19,6 +19,7 @@ import type {
   WinReason,
 } from "./types";
 import { makeRng } from "./prng";
+import { rimAt, softWallRadiusAt, softWallNormalAt, softWallAccelAt } from "./arena";
 
 /** 必殺技數值（集中可調，可被 SimConfig.special 覆寫） */
 export const DEFAULT_SPECIAL: SpecialConfig = {
@@ -93,6 +94,43 @@ export const DEFAULT_ARENA: ArenaConfig = {
   jumpPop: 0.15,
   jumpOverHeight: 34,
   hpBase: HP_BASE,
+};
+
+/**
+ * Beyblade X 風「Xtreme Stadium」內建場地（正方形場 + 綠色 M 形軟牆）：
+ *  - 方形邊界 box：四邊會反彈、四個角 = 出界口（計分 2）。
+ *  - 綠色軟牆 softWall（M 形 Xtreme Line）：內層半透膜，頂部凹口把陀螺導向中心逼對撞；
+ *    撞夠猛（沿真實法線向外速 > passThroughSpeed）才穿過綠牆進外圈 → 被甩進四角才出界。
+ *  - 頂部加速區（Xtreme Dash）：凹口弧段內爆發加速 + 向心拉。
+ * ⚠ 物理手感（出界率等）為起點值，需 `npm run balance` 的 XTREME 探針再校。
+ */
+export const XTREME_STADIUM: ArenaConfig = {
+  ...DEFAULT_ARENA,
+  wallBounce: 0.6,
+  // ⚠ 暫定「看得到對撞」手感（centerPull 高 + swirl 低 → 收斂對撞）。
+  // 註：大軟牆會壓制出界 → 純猜拳平衡無法成立（attack 缺勝條件），平衡抉擇待定（見對話）。
+  centerPull: 155,
+  swirl: 45,
+  friction: 0.5,
+  // 擊飛越牆出界的關鍵 jump 物理：jumpPop 強(0.7)+ 低重力(350，滯空夠久飛得到角落)，
+  // 越牆後 centerPull 關閉做彈道飛行（見 integrate）。實測 ~3% 罕見出界、飛行高度受控（p95 z≈100）。
+  // 這幾個值 + softWall.wallHeight 是「出界難度」的調校桿；DEFAULT_ARENA 不受影響（無 softWall）。
+  jumpPop: 0.7,
+  gravity: 350,
+  box: { half: 230, cornerGap: 60, wallBounce: 0.6, cornerScore: 2 },
+  softWall: {
+    radius: 208, // 放大到快貼邊線（box half 230；拱峰 ~1.07R≈223 + 綠帶 仍在頂邊 230 內）
+    bandHalf: 7, // 細綠帶（比照參考圖）
+    topAngle: Math.PI / 2,
+    // 形狀 = 手繪定案 M（直腿相切 + 圓弧拱 + 水平凹底），用 arena.ts 的 DEFAULT_MNOTCH 預設；
+    // 如需微調可加 crownRadius / crownSep / crownHeight / seamAngle / notchHalf。
+    wallHeight: 10, // 綠牆高度：陀螺 z 超過此值才飛越（被擊飛才出得去）
+    wallBounce: 0.6, // 實體牆反彈（同四邊）
+    spinLoss: 0.12,
+    accelBoost: 150,
+    accelInward: 110,
+    accelMinSpin: 0.12,
+  },
 };
 
 export const DEFAULT_SIM: Omit<SimConfig, "arena"> = {
@@ -277,16 +315,54 @@ function integrate(bodies: Body[], arena: ArenaConfig, dt: number): void {
     const nx = b.px / r;
     const ny = b.py / r;
 
-    // 1) 朝中心的固定吸引力（碗的斜度）
-    b.vx -= nx * arena.centerPull * dt;
-    b.vy -= ny * arena.centerPull * dt;
-
-    // 2) 自旋造成的繞圈力（進動）：方向與半徑垂直，大小正比於自旋，方向依旋向
+    // 進動基底（自旋繞圈方向）先算好：碗面力 / 軌道 / 加速區都會用到
     const spinNorm = b.spin / DEFAULT_SCALES.maxSpin;
     const tx = -ny * b.spinDir;
     const ty = nx * b.spinDir;
-    b.vx += tx * arena.swirl * spinNorm * dt;
-    b.vy += ty * arena.swirl * spinNorm * dt;
+
+    // 碗面力（朝心吸引 + 進動繞圈）只在「貼著碗面」時作用；被碰撞擊飛、越過綠牆（z > wallHeight）
+    // → 離開碗面做彈道飛行（只剩重力），不再被拉回中心 → 這才是「被擊飛才飛得到角落出界」的關鍵。
+    // 只在有 softWall 的場地有此區別；無 softWall（如 DEFAULT_ARENA）→ airborneOverWall 恆 false → 與改前逐位元相同。
+    const swForce = arena.softWall;
+    const airborneOverWall = !!swForce && b.z > (swForce.wallHeight ?? 20);
+    if (!airborneOverWall) {
+      // 1) 朝中心的固定吸引力（碗的斜度）
+      b.vx -= nx * arena.centerPull * dt;
+      b.vy -= ny * arena.centerPull * dt;
+      // 2) 自旋造成的繞圈力（進動）：方向與半徑垂直，大小正比於自旋，方向依旋向
+      b.vx += tx * arena.swirl * spinNorm * dt;
+      b.vy += ty * arena.swirl * spinNorm * dt;
+    }
+
+    // 2.5) 加速軌道（Xtreme Line）：在環帶上 → 沿自旋方向切向加速 + 可選向心拉。
+    // 只在 arena.rail 存在時生效 → 既有場地完全不受影響。施加量 ∝ 自旋，隨自旋衰減而遞減。
+    const rail = arena.rail;
+    if (rail && spinNorm >= (rail.minSpin ?? 0) && Math.abs(r - rail.radius) <= rail.band) {
+      b.vx += tx * rail.boost * spinNorm * dt;
+      b.vy += ty * rail.boost * spinNorm * dt;
+      if (rail.inward) {
+        b.vx -= nx * rail.inward * dt;
+        b.vy -= ny * rail.inward * dt;
+      }
+    }
+
+    // 2.6) 綠色軟牆頂部加速區（Xtreme Dash）：在頂端凹口弧段、貼牆且夠快 →
+    // 沿自旋方向切向爆發 + 沿「真實內法線」向心拉（凹口法線指向中心 → funnel 逼對撞）。
+    // 只在 arena.softWall.accelBoost 存在時生效，施加量 ∝ 自旋 → 隨自旋衰減、不會變發射器。
+    // 與 resolveWalls 的綠牆一致：跟著 softWall 走（不綁 box），方形/圓形場皆可；貼地時才作用。
+    const sw = arena.softWall;
+    if (!airborneOverWall && sw?.accelBoost && spinNorm >= (sw.accelMinSpin ?? 0.12)) {
+      const acc = softWallAccelAt(sw, b.px, b.py, b.radius);
+      if (acc.onZone) {
+        // 切向爆發：沿自旋繞圈方向（與軌道 rail 同基底 tx/ty）
+        b.vx += tx * sw.accelBoost * spinNorm * dt;
+        b.vy += ty * sw.accelBoost * spinNorm * dt;
+        // 向心拉：沿綠牆「真實內法線」（凹口處指向中心 → funnel）
+        const iN = sw.accelInward ?? 70;
+        b.vx -= acc.nx * iN * dt; // acc.n 為外法線 → 減去 = 沿內法線拉
+        b.vy -= acc.ny * iN * dt;
+      }
+    }
 
     // 3) 線性阻尼
     const damp = Math.max(0, 1 - arena.friction * dt);
@@ -477,8 +553,71 @@ function applySpecials(bodies: Body[], sc: SpecialConfig, rng: () => number, t: 
  * 只有撞牆瞬間「向外速度」超過 ringOutSpeed（被打得夠猛）才會衝出護牆 Ring-out。
  */
 function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
+  const box = arena.box;
+  const sw = arena.softWall;
   for (const b of bodies) {
     if (!b.alive) continue;
+
+    // 綠色實體內牆（M 形 Xtreme Line）：內層實體牆，方形場(box)與圓形場皆適用（與 box 解耦）。
+    // 撞到沿外法線反彈、保留切向（沿牆滑）；只在「貼地（z ≤ wallHeight）」才阻擋；
+    // 被碰撞擊飛到空中（z > wallHeight）→ 略過＝飛越綠牆，落到外層邊界判定
+    // （方形場：四角出界/四邊反彈；圓形場：radius+rim 出界/反彈）。＝唯一出綠框的方式就是被打飛起來。
+    if (sw && b.z <= (sw.wallHeight ?? 20)) {
+      const sr = Math.hypot(b.px, b.py) || 1e-6;
+      const stheta = Math.atan2(b.py, b.px);
+      const contact = softWallRadiusAt(sw, stheta) - b.radius;
+      if (sr > contact) {
+        const n = softWallNormalAt(sw, stheta);
+        const vn = b.vx * n.nx + b.vy * n.ny; // 沿外法線速度（>0 向外）
+        if (vn > 0) {
+          const e = sw.wallBounce ?? arena.wallBounce;
+          b.vx -= (1 + e) * vn * n.nx; // 反射法向、保留切向（沿牆滑）
+          b.vy -= (1 + e) * vn * n.ny;
+          b.spin -= vn * (sw.spinLoss ?? arena.wallSpinLoss);
+        }
+        const pen = sr - contact; // 沿法線推回牆內（與反射同軸 → 不殘留外速、不抖動）
+        b.px -= n.nx * pen;
+        b.py -= n.ny * pen;
+      }
+    }
+
+    // 方形邊界：四邊反彈（保留切向 → 滑向角落）、四角開口出界
+    if (box) {
+      const H = box.half;
+      const lim = H - b.radius;
+      const g = box.cornerGap;
+      const e = box.wallBounce ?? arena.wallBounce;
+      const nearCornerX = Math.abs(b.px) > H - g;
+      const nearCornerY = Math.abs(b.py) > H - g;
+      const overX = b.px > lim ? 1 : b.px < -lim ? -1 : 0;
+      const overY = b.py > lim ? 1 : b.py < -lim ? -1 : 0;
+      // 越過邊界、且落在角落開口（該段沒有牆）→ 出界
+      if ((overX !== 0 && nearCornerY) || (overY !== 0 && nearCornerX)) {
+        b.alive = false;
+        b.deadAtStep = step;
+        b.deathReason = "ring-out";
+        b.ringOutAngle = Math.atan2(b.py, b.px);
+        continue;
+      }
+      // 撞到邊牆（非角落開口）→ 反彈：只反射垂直分量、保留切向速度（沿牆滑）
+      if (overX !== 0 && !nearCornerY) {
+        b.px = overX > 0 ? lim : -lim;
+        const outward = b.vx * overX;
+        if (outward > 0) {
+          b.spin -= outward * arena.wallSpinLoss;
+          b.vx = -b.vx * e;
+        }
+      }
+      if (overY !== 0 && !nearCornerX) {
+        b.py = overY > 0 ? lim : -lim;
+        const outward = b.vy * overY;
+        if (outward > 0) {
+          b.spin -= outward * arena.wallSpinLoss;
+          b.vy = -b.vy * e;
+        }
+      }
+      continue;
+    }
 
     const r = Math.hypot(b.px, b.py);
     const limit = arena.radius - b.radius; // 陀螺邊緣貼到護牆的中心距離
@@ -488,12 +627,16 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
     const ny = b.py / (r || 1e-6);
     const radialVel = b.vx * nx + b.vy * ny; // 向外為正
 
+    // 依「撞牆角度」查所在分區（破口門檻低/反彈不同），未分區處退回全域數值
+    const ang = Math.atan2(b.py, b.px);
+    const rp = rimAt(arena, ang);
+
     // 被打得夠猛 → 衝出護牆，判定出界（記下出界角度供計分分區用）
-    if (radialVel > arena.ringOutSpeed) {
+    if (radialVel > rp.ringOutSpeed) {
       b.alive = false;
       b.deadAtStep = step;
       b.deathReason = "ring-out";
-      b.ringOutAngle = Math.atan2(b.py, b.px);
+      b.ringOutAngle = ang;
       continue;
     }
 
@@ -501,7 +644,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
     b.px = nx * limit;
     b.py = ny * limit;
     if (radialVel > 0) {
-      const e = arena.wallBounce;
+      const e = rp.wallBounce;
       b.vx -= (1 + e) * radialVel * nx;
       b.vy -= (1 + e) * radialVel * ny;
       b.spin -= radialVel * arena.wallSpinLoss;
@@ -531,12 +674,14 @@ function checkDeaths(bodies: Body[], arena: ArenaConfig, step: number): void {
       continue;
     }
 
-    // 出界判負（中心離原點超過場地半徑）
-    const distFromCenter = Math.hypot(b.px, b.py);
-    if (distFromCenter > arena.radius) {
-      b.alive = false;
-      b.deadAtStep = step;
-      b.deathReason = "ring-out";
+    // 出界判負（圓形場：中心離原點超過半徑）。方形場由 resolveWalls 處理角落出界，這裡略過。
+    if (!arena.box) {
+      const distFromCenter = Math.hypot(b.px, b.py);
+      if (distFromCenter > arena.radius) {
+        b.alive = false;
+        b.deadAtStep = step;
+        b.deathReason = "ring-out";
+      }
     }
   }
 }
