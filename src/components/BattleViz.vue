@@ -424,6 +424,7 @@ function drawTop(
   alive: boolean,
   typeKey: string,
   alpha = 1,
+  dark = false, // 分身：壓暗
 ) {
   const [gx, gy] = toCanvas(wx, wy);
   const rad = scaleLen(worldRad);
@@ -446,6 +447,7 @@ function drawTop(
   g.translate(gx, by);
   g.scale(hScale, hScale);
   g.globalAlpha = (alive ? 1 : 0.28) * alpha;
+  if (dark) g.filter = "brightness(0.42) saturate(1.3)"; // 分身壓暗
   g.rotate(angle);
   if (img && img.complete && img.naturalWidth > 0) {
     // 貼圖（已含刀刃造型，依 angle 旋轉）
@@ -503,6 +505,12 @@ function lerpFrame(a: Frame, b: Frame, f: number): Frame {
         spin: ba.spin + (bb.spin - ba.spin) * f,
         hp: ba.hp + (bb.hp - ba.hp) * f,
         alive: f < 1 ? ba.alive : bb.alive,
+        isClone: ba.isClone,
+        ownerId: ba.ownerId,
+        cloneFade:
+          ba.cloneFade != null && bb.cloneFade != null
+            ? ba.cloneFade + (bb.cloneFade - ba.cloneFade) * f
+            : (f < 1 ? ba.cloneFade : bb.cloneFade),
       };
     }),
   };
@@ -577,41 +585,74 @@ function drawSparks(g: CanvasRenderingContext2D, curT: number) {
   }
 }
 
-/** 擊破爆裂：ko 時白光環擴張 + 碎片噴飛（出界/停轉走慢動作、不爆）。 */
+/** 擊破破碎：ko 時白光閃 + 陀螺碎裂成楔形碎片飛散下墜（出界/停轉走慢動作、不爆）。 */
 function drawDeaths(g: CanvasRenderingContext2D, curT: number) {
   const evs = result.value?.deathEvents;
   if (!evs) return;
-  const DUR = 0.7;
+  const DUR = 1.0;
   for (let k = 0; k < evs.length; k++) {
     const de = evs[k];
     if (de.reason !== "ko") continue;
     const age = curT - de.t;
     if (age < 0 || age >= DUR) continue;
     const a = age / DUR;
+    const fast = Math.min(1, age / 0.35); // 衝擊光快、碎片慢
     const [ex, ey] = toCanvas(de.x, de.y);
     const col = colorOf(de.id);
     g.save();
-    g.globalAlpha = (1 - a) * 0.85; // 衝擊白光環
+    // 衝擊白光環 + 內爆閃光（快）
+    g.globalAlpha = (1 - fast) * 0.85;
     g.strokeStyle = "#fff";
-    g.lineWidth = Math.max(1, scaleLen(7) * (1 - a));
+    g.lineWidth = Math.max(1, scaleLen(7) * (1 - fast));
     g.beginPath();
-    g.arc(ex, ey, scaleLen(16 + a * 86), 0, Math.PI * 2);
+    g.arc(ex, ey, scaleLen(16 + fast * 80), 0, Math.PI * 2);
     g.stroke();
-    g.globalAlpha = Math.max(0, 1 - a * 2.4); // 內爆閃光
+    g.globalAlpha = Math.max(0, 1 - fast * 1.8);
     g.fillStyle = "#fff";
     g.beginPath();
-    g.arc(ex, ey, scaleLen(28) * (1 - a), 0, Math.PI * 2);
+    g.arc(ex, ey, scaleLen(26) * (1 - fast), 0, Math.PI * 2);
     g.fill();
-    const n = 16; // 碎片噴飛（陀螺顏色）
-    g.fillStyle = col;
-    for (let i = 0; i < n; i++) {
-      const ang = hash01(k * 91.3 + i * 3.1) * Math.PI * 2;
-      const spd = 0.45 + hash01(k * 57.7 + i * 7.9) * 0.55;
-      const d = scaleLen(18 + 130 * spd) * a;
-      const sz = scaleLen(2 + hash01(k * 7.3 + i) * 4) * (1 - a);
-      g.globalAlpha = (1 - a) * 0.95;
+    // 破碎：2 大塊往相反方向裂開（慢飛緩翻）+ 數個小碎片四散
+    const drawChunk = (dir: number, dist: number, drop: number, rot: number, fr: number, half: number, alp: number, edge: boolean) => {
+      g.save();
+      g.globalAlpha = alp;
+      g.translate(ex + Math.cos(dir) * dist, ey + Math.sin(dir) * dist + drop);
+      g.rotate(rot);
+      g.fillStyle = col;
       g.beginPath();
-      g.arc(ex + Math.cos(ang) * d, ey + Math.sin(ang) * d, Math.max(0.5, sz), 0, Math.PI * 2);
+      g.moveTo(0, 0);
+      g.arc(0, 0, fr, -half, half);
+      g.closePath();
+      g.fill();
+      if (edge) {
+        g.strokeStyle = "rgba(255,255,255,0.6)";
+        g.lineWidth = 1.5;
+        g.stroke();
+      }
+      g.restore();
+    };
+    const splitAxis = hash01(k * 2.7) * Math.PI; // 裂開軸向
+    for (let i = 0; i < 2; i++) {
+      const dir = splitAxis + (i === 0 ? 0 : Math.PI); // 兩大塊相反方向
+      const dist = scaleLen(8 + 30 * (0.7 + hash01(k * 9.3 + i) * 0.3)) * a;
+      const rot = dir + a * (1.4 + hash01(k + i)) * (i ? 1 : -1); // 緩翻
+      drawChunk(dir, dist, scaleLen(56) * a * a, rot, scaleLen(16) * (1 - a * 0.35), 0.95, (1 - a) * 0.96, true);
+    }
+    const SMALL = 7;
+    for (let i = 0; i < SMALL; i++) {
+      const ang = hash01(k * 31.3 + i * 2.7) * Math.PI * 2;
+      const spd = 0.6 + hash01(k * 17.1 + i * 3.3) * 0.5;
+      const rot = ang + a * (4 + hash01(k + i) * 5) * (i % 2 ? 1 : -1);
+      drawChunk(ang, scaleLen(16 + 92 * spd) * a, scaleLen(50) * a * a, rot, scaleLen(4 + hash01(k * 7.7 + i) * 4) * (1 - a * 0.5), 0.5, (1 - a) * 0.92, false);
+    }
+    // 細火星
+    g.fillStyle = "#ffd24d";
+    for (let i = 0; i < 10; i++) {
+      const ang = hash01(k * 91.3 + i * 3.1) * Math.PI * 2;
+      const d = scaleLen(18 + 130 * (0.4 + hash01(k * 7.3 + i) * 0.6)) * a;
+      g.globalAlpha = (1 - a) * 0.9;
+      g.beginPath();
+      g.arc(ex + Math.cos(ang) * d, ey + Math.sin(ang) * d, Math.max(0.5, scaleLen(2.5) * (1 - a)), 0, Math.PI * 2);
       g.fill();
     }
     g.restore();
@@ -633,6 +674,7 @@ function draw() {
     const frame = lerpFrame(frames[i0], frames[i1], ph - i0);
     // 軌跡尾巴
     for (const b of frame.bodies) {
+      if (b.isClone) continue; // 分身不畫尾巴
       const col = colorOf(b.id);
       g.beginPath();
       let started = false;
@@ -647,8 +689,17 @@ function draw() {
       g.lineWidth = 2;
       g.stroke();
     }
+    // 擊破(ko)的陀螺 → 不畫半透明陀螺，改由 drawDeaths 畫破碎碎片
+    const koIds = new Set(result.value.deathEvents.filter((d) => d.reason === "ko").map((d) => d.id));
     // 陀螺 + 撞牆閃光
     for (const b of frame.bodies) {
+      if (b.isClone) {
+        if (!b.alive) continue; // 未啟用/已消失的分身不畫
+        const oid = b.ownerId ?? b.id;
+        drawTop(g, b.x, b.y, b.z ?? 0, b.angle, colorOf(oid), 20, true, presetOf(oid), 0.7 * (b.cloneFade ?? 1), true); // 暗色小分身、末段淡出
+        continue;
+      }
+      if (!b.alive && koIds.has(b.id)) continue; // 擊破者交給破碎特效
       const col = colorOf(b.id);
       const distC = Math.hypot(b.x, b.y);
       if (b.alive && (b.z ?? 0) < 12 && distC > arena.value.radius - 26 - 8) {
@@ -680,7 +731,7 @@ function draw() {
       if (!fb) continue;
       const [ex, ey] = toCanvas(fb.x, fb.y);
       const prog = dtv / 0.55;
-      const ecol = ev.kind === "blast" ? "#ffce4d" : colorOf(ev.id);
+      const ecol = specialColor(ev);
       g.save();
       g.globalAlpha = (1 - prog) * 0.9;
       g.strokeStyle = ecol;
@@ -694,8 +745,8 @@ function draw() {
     // 必殺技停格 banner：大字招式名（停格期間顯示，讓人看清是什麼招）
     if (freezeEvent.value) {
       const ev = freezeEvent.value;
-      const name = ev.kind === "blast" ? "衝　擊" : "突　進";
-      const ecol = ev.kind === "blast" ? "#ffce4d" : colorOf(ev.id);
+      const name = SPECIAL_NAMES[ev.kind];
+      const ecol = specialColor(ev);
       g.save();
       g.globalAlpha = 0.16;
       g.fillStyle = "#05080d";
@@ -830,11 +881,44 @@ function isFinished(): boolean {
 
 /** 必殺技觸發說明（讀陀螺後台目前數值）：條件 · 機率 · 冷卻 · 每回合次數。 */
 function specialInfo(kind: "" | SpecialKind): string {
-  if (kind === "rush")
-    return `逼近觸發 · ${Math.round(special.rushChance * 100)}% · 冷卻 ${special.rushCooldown}s · 每回合 ${special.rushMaxUses} 次`;
-  if (kind === "blast")
-    return `猛擊觸發 · ${Math.round(special.blastChance * 100)}% · 冷卻 ${special.blastCooldown}s · 每回合 ${special.blastMaxUses} 次`;
-  return "";
+  const s = special;
+  const pct = (c: number) => Math.round(c * 100);
+  switch (kind) {
+    case "rush":
+      return `逼近觸發 · ${pct(s.rushChance)}% · 冷卻 ${s.rushCooldown}s · 每回合 ${s.rushMaxUses} 次`;
+    case "blast":
+      return `猛擊觸發 · ${pct(s.blastChance)}% · 冷卻 ${s.blastCooldown}s · 每回合 ${s.blastMaxUses} 次`;
+    case "dash":
+      return `自旋偏低觸發 · ${pct(s.dashChance)}% · 冷卻 ${s.dashCooldown}s · 每回合 ${s.dashMaxUses} 次`;
+    case "vortex":
+      return `對手進範圍觸發 · ${pct(s.vortexChance)}% · 冷卻 ${s.vortexCooldown}s · 每回合 ${s.vortexMaxUses} 次`;
+    case "clone":
+      return `對手進範圍觸發 · ${pct(s.cloneChance)}% · 冷卻 ${s.cloneCooldown}s · 每回合 ${s.cloneMaxUses} 次`;
+    default:
+      return "";
+  }
+}
+
+/** 必殺技顯示名（停格 banner 用，全形排版）。 */
+const SPECIAL_NAMES: Record<SpecialKind, string> = {
+  rush: "突　進",
+  blast: "衝　擊",
+  dash: "高速移動",
+  vortex: "旋　渦",
+  clone: "分　身",
+};
+/** 必殺技特效色：blast 黃 / dash 青 / vortex 紫 / rush・clone 用玩家色。 */
+function specialColor(ev: SpecialEvent): string {
+  switch (ev.kind) {
+    case "blast":
+      return "#ffce4d";
+    case "dash":
+      return "#5fd0ff";
+    case "vortex":
+      return "#c07bff";
+    default:
+      return colorOf(ev.id);
+  }
 }
 
 /** 對戰場直接切換場地（含綠牆場 / 一般場）→ 套用並重開一局。 */
@@ -884,8 +968,11 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
         <label class="field">必殺技
           <select v-model="setupA.special" :disabled="!!launchA">
             <option value="">無</option>
-            <option value="rush">衝刺突進</option>
-            <option value="blast">衝擊</option>
+            <option value="rush">🗡️ 衝刺突進</option>
+            <option value="blast">💥 衝擊</option>
+            <option value="dash">⚡ 高速移動</option>
+            <option value="vortex">🌀 旋渦</option>
+            <option value="clone">👥 分身</option>
           </select>
         </label>
         <p v-if="setupA.special" class="sp-info">⚡ {{ specialInfo(setupA.special) }}</p>
@@ -907,8 +994,11 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
         <label class="field">必殺技
           <select v-model="setupB.special" :disabled="!!launchB">
             <option value="">無</option>
-            <option value="rush">衝刺突進</option>
-            <option value="blast">衝擊</option>
+            <option value="rush">🗡️ 衝刺突進</option>
+            <option value="blast">💥 衝擊</option>
+            <option value="dash">⚡ 高速移動</option>
+            <option value="vortex">🌀 旋渦</option>
+            <option value="clone">👥 分身</option>
           </select>
         </label>
         <p v-if="setupB.special" class="sp-info">⚡ {{ specialInfo(setupB.special) }}</p>

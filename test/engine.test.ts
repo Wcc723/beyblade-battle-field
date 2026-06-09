@@ -669,6 +669,71 @@ describe("必殺技：冷卻 + 每回合限次", () => {
   });
 });
 
+describe("必殺技新招：dash / vortex / clone", () => {
+  const open = neutralArena({ radius: 400, ringOutSpeed: 1e9, spinDecayBase: 0 });
+
+  it("dash 高速移動：自旋偏低時回補自旋 + 發動事件", () => {
+    const r = simulate(
+      [
+        body({ id: "A", position: { x: -120, y: 0 }, velocity: { x: 40, y: 0 }, spin: 200, radius: 20, special: "dash" }),
+        body({ id: "B", position: { x: 200, y: 0 }, velocity: { x: 0, y: 0 }, spin: 1500, radius: 20 }),
+      ],
+      {
+        dt: 1 / 60,
+        maxTime: 1,
+        arena: open,
+        seed: 1,
+        special: { dashChance: 1, dashTriggerSpin: 0.5, dashMaxUses: 1, dashSpinRestore: 1500, dashDuration: 1, dashAccel: 0 },
+      },
+    );
+    expect(r.specialEvents.filter((e) => e.kind === "dash" && e.id === "A").length).toBe(1);
+    const aSpins = r.frames.map((f) => f.bodies.find((x) => x.id === "A")!.spin);
+    expect(Math.max(...aSpins)).toBeGreaterThan(1000); // 從 200 回補後遠高於起始
+  });
+
+  it("vortex 旋渦：對手進範圍 → 被往自己拉近", () => {
+    const r = simulate(
+      [
+        body({ id: "A", position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 }, spin: 3000, radius: 20, special: "vortex" }),
+        body({ id: "B", position: { x: 200, y: 0 }, velocity: { x: 0, y: 0 }, spin: 3000, radius: 20 }),
+      ],
+      {
+        dt: 1 / 60,
+        maxTime: 0.6,
+        arena: open,
+        seed: 1,
+        special: { vortexChance: 1, vortexRange: 250, vortexMaxUses: 1, vortexPull: 400, vortexDuration: 1 },
+      },
+    );
+    expect(r.specialEvents.filter((e) => e.kind === "vortex" && e.id === "A").length).toBe(1);
+    const bxStart = r.frames[0].bodies.find((x) => x.id === "B")!.x;
+    const bxEnd = r.frames[r.frames.length - 1].bodies.find((x) => x.id === "B")!.x;
+    expect(bxEnd).toBeLessThan(bxStart - 5); // 被拉向 A（左）
+  });
+
+  it("clone 分身：召喚分身(isClone)、不計勝負、x秒後消失", () => {
+    const r = simulate(
+      [
+        body({ id: "A", position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 }, spin: 3000, radius: 20, special: "clone" }),
+        body({ id: "B", position: { x: 150, y: 0 }, velocity: { x: 0, y: 0 }, spin: 3000, radius: 20 }),
+      ],
+      {
+        dt: 1 / 60,
+        maxTime: 3,
+        arena: open,
+        seed: 1,
+        special: { cloneChance: 1, cloneRange: 200, cloneMaxUses: 1, cloneDuration: 1, cloneSpin: 2000, cloneAttackMul: 0.4, cloneHoming: 0 },
+      },
+    );
+    expect(r.specialEvents.filter((e) => e.kind === "clone" && e.id === "A").length).toBe(1);
+    expect(r.frames.some((f) => f.bodies.some((bd) => bd.isClone && bd.alive))).toBe(true); // 曾出現存活分身
+    expect(["A", "B", null]).toContain(r.winnerId); // 勝負只算本體
+    expect(["A", "B", null]).toContain(r.loserId);
+    const last = r.frames[r.frames.length - 1];
+    expect(last.bodies.some((bd) => bd.isClone && bd.alive)).toBe(false); // 時間到已消失
+  });
+});
+
 describe("基本輸出形狀", () => {
   it("frames 連續、結果欄位齊全", () => {
     const arena = DEFAULT_ARENA;

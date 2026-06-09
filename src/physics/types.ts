@@ -246,6 +246,12 @@ export interface BodyFrame {
   /** 剩餘血量（耐久條） */
   hp: number;
   alive: boolean;
+  /** 是否為分身（前端用：暗色半透明繪製、用主人顏色、不畫血條） */
+  isClone?: boolean;
+  /** 分身主人 id（前端上色用） */
+  ownerId?: string;
+  /** 分身淡出比例 0~1（1=完整，接近 despawn → 0，做「慢慢消失」） */
+  cloneFade?: number;
 }
 
 export interface Frame {
@@ -255,7 +261,7 @@ export interface Frame {
 }
 
 /** 必殺技種類（空字串/未設 = 無） */
-export type SpecialKind = "rush" | "blast";
+export type SpecialKind = "rush" | "blast" | "dash" | "vortex" | "clone";
 
 /** 必殺技發動事件（供回放特效用） */
 export interface SpecialEvent {
@@ -312,6 +318,45 @@ export interface SpecialConfig {
   blastCooldown: number;
   /** 衝擊：每回合最多發動次數 */
   blastMaxUses: number;
+
+  /* —— 高速移動 dash：自旋偏低時觸發 → 回補自旋 + 一段時間移動加速 —— */
+  dashChance: number;
+  dashCooldown: number;
+  dashMaxUses: number;
+  /** 自旋比例（spin/maxSpin）低於此值才觸發 */
+  dashTriggerSpin: number;
+  /** 回補的自旋量 */
+  dashSpinRestore: number;
+  /** 加速持續秒數 */
+  dashDuration: number;
+  /** 加速期間沿移動方向的額外加速度 */
+  dashAccel: number;
+
+  /* —— 旋渦 vortex：對手進範圍觸發 → 持續數秒把對手往自己拉（重型爽） —— */
+  vortexChance: number;
+  vortexCooldown: number;
+  vortexMaxUses: number;
+  /** 對手進入此距離才觸發 */
+  vortexRange: number;
+  /** 吸引對手的力道 */
+  vortexPull: number;
+  /** 吸引持續秒數 */
+  vortexDuration: number;
+
+  /* —— 分身 clone：生一個暫時分身（低傷、會撞會扣血、不計勝負、x秒消失） —— */
+  cloneChance: number;
+  cloneCooldown: number;
+  cloneMaxUses: number;
+  /** 對手進入此距離才召喚 */
+  cloneRange: number;
+  /** 分身持續秒數 */
+  cloneDuration: number;
+  /** 分身攻擊力 = 本體攻擊 × 此倍率（低傷） */
+  cloneAttackMul: number;
+  /** 分身的自旋量 */
+  cloneSpin: number;
+  /** 分身朝對手追擊的加速度 */
+  cloneHoming: number;
 }
 
 export type WinReason = "ring-out" | "spin-out" | "timeout" | "draw" | "ko";

@@ -37,6 +37,30 @@ export const DEFAULT_SPECIAL: SpecialConfig = {
   blastDamage: 300,
   blastCooldown: 5.0,
   blastMaxUses: 4,
+
+  dashChance: 0.6,
+  dashCooldown: 8,
+  dashMaxUses: 3,
+  dashTriggerSpin: 0.45,
+  dashSpinRestore: 1200,
+  dashDuration: 2.0,
+  dashAccel: 700,
+
+  vortexChance: 0.55,
+  vortexCooldown: 8,
+  vortexMaxUses: 3,
+  vortexRange: 220,
+  vortexPull: 340,
+  vortexDuration: 1.6,
+
+  cloneChance: 0.7,
+  cloneCooldown: 10,
+  cloneMaxUses: 1,
+  cloneRange: 260,
+  cloneDuration: 4.0,
+  cloneAttackMul: 0.45,
+  cloneSpin: 2000,
+  cloneHoming: 280,
 };
 
 /** 血量（耐久條）基準預設：maxHp = hpBase × 重量 */
@@ -74,6 +98,16 @@ interface Body {
   specialReadyT: number;
   /** 必殺技本回合剩餘可用次數 */
   specialUsesLeft: number;
+  /** dash 加速持續到此時間 */
+  dashUntilT: number;
+  /** vortex 吸引持續到此時間 */
+  vortexUntilT: number;
+  /** 是否為分身（不計勝負、無視牆、時間到 despawn） */
+  isClone: boolean;
+  /** 分身主人 id（"" = 非分身） */
+  cloneOwnerId: string;
+  /** 分身存活到此時間（despawn） */
+  cloneUntilT: number;
   ringOutAngle: number;
 }
 
@@ -185,8 +219,87 @@ function snapshot(t: number, bodies: Body[]): Frame {
     spin: Math.max(0, b.spin),
     hp: Math.max(0, b.hp),
     alive: b.alive,
+    isClone: b.isClone,
+    ownerId: b.cloneOwnerId,
+    cloneFade: b.isClone && b.alive ? Math.max(0, Math.min(1, (b.cloneUntilT - t) / 0.4)) : undefined,
   }));
   return { t, bodies: out };
+}
+
+/** 每招的每回合次數上限。 */
+function maxUsesFor(special: SpecialKind | "", sc: SpecialConfig): number {
+  switch (special) {
+    case "rush":
+      return sc.rushMaxUses;
+    case "blast":
+      return sc.blastMaxUses;
+    case "dash":
+      return sc.dashMaxUses;
+    case "vortex":
+      return sc.vortexMaxUses;
+    case "clone":
+      return sc.cloneMaxUses;
+    default:
+      return 0;
+  }
+}
+
+/** 隊伍：分身屬於主人那隊（用來判定敵我、避免分身打自己人）。 */
+function teamOf(b: Body): string {
+  return b.isClone ? b.cloneOwnerId : b.id;
+}
+
+/** 最近的「敵隊・非分身」存活陀螺（必殺技/追擊都鎖定真正的對手本體）。 */
+function nearestEnemy(bodies: Body[], b: Body): Body | null {
+  let best: Body | null = null;
+  let bd = Infinity;
+  const team = teamOf(b);
+  for (const o of bodies) {
+    if (!o.alive || o === b || o.isClone || teamOf(o) === team) continue;
+    const d = Math.hypot(o.px - b.px, o.py - b.py);
+    if (d < bd) {
+      bd = d;
+      best = o;
+    }
+  }
+  return best;
+}
+
+/** 建立伴生分身（開場 alive:false，觸發時啟用）。免疫扣血/停轉，只靠時間 despawn。 */
+function makeClone(owner: Body, sc: SpecialConfig): Body {
+  return {
+    id: owner.id + "~clone",
+    color: owner.color,
+    attack: owner.attack * sc.cloneAttackMul,
+    defense: owner.defense,
+    stamina: owner.stamina,
+    mass: Math.max(0.05, owner.mass * 0.6),
+    radius: owner.radius * 0.8,
+    px: owner.px,
+    py: owner.py,
+    vx: 0,
+    vy: 0,
+    z: 0,
+    vz: 0,
+    spin: 0,
+    hp: 1e9,
+    maxHp: 1e9,
+    spinDir: owner.spinDir,
+    angle: 0,
+    alive: false,
+    deadAtStep: -1,
+    deathReason: null,
+    special: "",
+    prevInRange: false,
+    specialReadyT: 0,
+    specialUsesLeft: 0,
+    dashUntilT: 0,
+    vortexUntilT: 0,
+    isClone: true,
+    cloneOwnerId: owner.id,
+    cloneUntilT: 0,
+    ringOutAngle: NaN,
+  };
 }
 
 /**
@@ -225,9 +338,21 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
     special: b.special ?? "",
     prevInRange: false,
     specialReadyT: 0,
-    specialUsesLeft: b.special === "rush" ? sc.rushMaxUses : b.special === "blast" ? sc.blastMaxUses : 0,
+    specialUsesLeft: maxUsesFor(b.special ?? "", sc),
+    dashUntilT: 0,
+    vortexUntilT: 0,
+    isClone: false,
+    cloneOwnerId: "",
+    cloneUntilT: 0,
     ringOutAngle: NaN,
   }));
+  // 為「裝備分身」的陀螺各建一顆伴生分身（開場 alive:false，觸發時啟用）→ bodies 陣列長度恆定。
+  for (const init of inits) {
+    if ((init.special ?? "") === "clone") {
+      const owner = bodies.find((bd) => bd.id === init.id);
+      if (owner) bodies.push(makeClone(owner, sc));
+    }
+  }
 
   const frames: Frame[] = [snapshot(0, bodies)];
   const slowmoCues: number[] = [];
@@ -246,7 +371,7 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
     integrate(bodies, arena, dt);
     resolveCollisions(bodies, arena, sc, rng, t, specialEvents, collisionEvents);
     resolveWalls(bodies, arena, step);
-    applySpecials(bodies, sc, rng, t, specialEvents);
+    applySpecials(bodies, sc, rng, t, dt, specialEvents);
     checkDeaths(bodies, arena, step);
 
     // 本步發生淘汰（出界 / 停轉 / 擊破）→ 記錄死亡事件（特效）+ 觸發慢動作
@@ -261,7 +386,7 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
 
     if (step % sampleEvery === 0) frames.push(snapshot(t, bodies));
 
-    const aliveCount = bodies.reduce((n, b) => n + (b.alive ? 1 : 0), 0);
+    const aliveCount = bodies.reduce((n, b) => n + (b.alive && !b.isClone ? 1 : 0), 0); // 分身不計勝負
     // 第一次分出勝負 → 鎖定結果（後續演出不再改變勝負）
     if (decidedStep < 0 && aliveCount <= 1) {
       decidedStep = step;
@@ -418,6 +543,7 @@ function resolveCollisions(
       const a = bodies[i];
       const b = bodies[j];
       if (!a.alive || !b.alive) continue;
+      if (teamOf(a) === teamOf(b)) continue; // 分身不撞自己人
 
       const dx = b.px - a.px;
       const dy = b.py - a.py;
@@ -533,44 +659,127 @@ function resolveCollisions(
 }
 
 /**
- * 必殺技【衝刺突進】：alive 且裝備 rush 的陀螺，在「剛進入對手攻擊距離」時，
- * 機率朝對手爆發加速（製造猛撞 / 擊飛）+ 直接扣對手血量 rushDamage。
+ * 必殺技統一處理：觸發（過冷卻 + 還有次數 +（多半）機率）+ 持續效果。
+ * rush 衝刺 / blast 衝擊(在 resolveCollisions) / dash 高速移動 / vortex 旋渦 / clone 分身。
  */
-function applySpecials(bodies: Body[], sc: SpecialConfig, rng: () => number, t: number, events: SpecialEvent[]): void {
+function applySpecials(
+  bodies: Body[],
+  sc: SpecialConfig,
+  rng: () => number,
+  t: number,
+  dt: number,
+  events: SpecialEvent[],
+): void {
   for (const b of bodies) {
-    if (!b.alive || b.special !== "rush") {
+    // === 分身：只做維護（時間到 despawn + 朝對手追擊），不發動必殺 ===
+    if (b.isClone) {
+      if (b.alive && t >= b.cloneUntilT) b.alive = false; // 時間到消失（非淘汰、不記死亡事件）
+      if (b.alive) {
+        const tgt = nearestEnemy(bodies, b);
+        if (tgt) {
+          const dx = tgt.px - b.px;
+          const dy = tgt.py - b.py;
+          const d = Math.hypot(dx, dy) || 1e-6;
+          b.vx += (dx / d) * sc.cloneHoming * dt;
+          b.vy += (dy / d) * sc.cloneHoming * dt;
+        }
+      }
+      continue;
+    }
+    if (!b.alive) {
       b.prevInRange = false;
       continue;
     }
-    // 找最近的另一顆存活陀螺當目標
-    let opp: Body | null = null;
-    let best = Infinity;
-    for (const o of bodies) {
-      if (o === b || !o.alive) continue;
-      const d = Math.hypot(o.px - b.px, o.py - b.py);
-      if (d < best) {
-        best = d;
-        opp = o;
-      }
+
+    // === 持續效果（已發動中）===
+    if (t < b.dashUntilT) {
+      // 高速移動：沿目前移動方向額外加速
+      const sp = Math.hypot(b.vx, b.vy) || 1e-6;
+      b.vx += (b.vx / sp) * sc.dashAccel * dt;
+      b.vy += (b.vy / sp) * sc.dashAccel * dt;
     }
-    const inRange = opp !== null && best < sc.rushRange;
-    // 觸發＝剛進入射程 + 過了冷卻 + 本回合還有次數 → 再擲機率
-    if (inRange && opp && !b.prevInRange && t >= b.specialReadyT && b.specialUsesLeft > 0) {
-      if (rng() < sc.rushChance) {
-        const dx = opp.px - b.px;
-        const dy = opp.py - b.py;
+    if (t < b.vortexUntilT) {
+      // 旋渦：把最近對手往自己拉
+      const opp = nearestEnemy(bodies, b);
+      if (opp) {
+        const dx = b.px - opp.px;
+        const dy = b.py - opp.py;
         const d = Math.hypot(dx, dy) || 1e-6;
-        b.vx += (dx / d) * sc.rushSpeed;
-        b.vy += (dy / d) * sc.rushSpeed;
-        opp.hp -= sc.rushDamage; // 直接傷害
-        b.specialReadyT = t + sc.rushCooldown;
-        b.specialUsesLeft -= 1;
-        events.push({ t, id: b.id, kind: "rush", x: b.px, y: b.py });
-      } else {
-        b.specialReadyT = t + 0.5; // 沒中也短暫冷卻，避免邊界抖動狂擲（不耗次數）
+        opp.vx += (dx / d) * sc.vortexPull * dt;
+        opp.vy += (dy / d) * sc.vortexPull * dt;
       }
     }
-    b.prevInRange = inRange;
+
+    // === 觸發 ===
+    const opp = nearestEnemy(bodies, b);
+    const best = opp ? Math.hypot(opp.px - b.px, opp.py - b.py) : Infinity;
+    const ready = t >= b.specialReadyT && b.specialUsesLeft > 0;
+
+    if (b.special === "rush") {
+      const inRange = opp !== null && best < sc.rushRange;
+      if (inRange && opp && !b.prevInRange && ready) {
+        if (rng() < sc.rushChance) {
+          const dx = opp.px - b.px;
+          const dy = opp.py - b.py;
+          const d = Math.hypot(dx, dy) || 1e-6;
+          b.vx += (dx / d) * sc.rushSpeed;
+          b.vy += (dy / d) * sc.rushSpeed;
+          opp.hp -= sc.rushDamage;
+          b.specialReadyT = t + sc.rushCooldown;
+          b.specialUsesLeft -= 1;
+          events.push({ t, id: b.id, kind: "rush", x: b.px, y: b.py });
+        } else {
+          b.specialReadyT = t + 0.5; // 沒中短暫冷卻（不耗次數）
+        }
+      }
+      b.prevInRange = inRange;
+    } else if (b.special === "dash") {
+      // 自旋偏低時觸發 → 回補自旋 + 進入加速狀態
+      const spinNorm = b.spin / DEFAULT_SCALES.maxSpin;
+      if (ready && spinNorm < sc.dashTriggerSpin && rng() < sc.dashChance) {
+        b.spin += sc.dashSpinRestore;
+        b.dashUntilT = t + sc.dashDuration;
+        b.specialReadyT = t + sc.dashCooldown;
+        b.specialUsesLeft -= 1;
+        events.push({ t, id: b.id, kind: "dash", x: b.px, y: b.py });
+      }
+    } else if (b.special === "vortex") {
+      const inRange = opp !== null && best < sc.vortexRange;
+      if (inRange && !b.prevInRange && ready && rng() < sc.vortexChance) {
+        b.vortexUntilT = t + sc.vortexDuration;
+        b.specialReadyT = t + sc.vortexCooldown;
+        b.specialUsesLeft -= 1;
+        events.push({ t, id: b.id, kind: "vortex", x: b.px, y: b.py });
+      }
+      b.prevInRange = inRange;
+    } else if (b.special === "clone") {
+      const inRange = opp !== null && best < sc.cloneRange;
+      if (inRange && opp && !b.prevInRange && ready && rng() < sc.cloneChance) {
+        const clone = bodies.find((c) => c.isClone && c.cloneOwnerId === b.id);
+        if (clone && !clone.alive) {
+          const dx = opp.px - b.px;
+          const dy = opp.py - b.py;
+          const d = Math.hypot(dx, dy) || 1e-6;
+          clone.px = b.px + (dx / d) * (b.radius * 2);
+          clone.py = b.py + (dy / d) * (b.radius * 2);
+          clone.vx = (dx / d) * 120;
+          clone.vy = (dy / d) * 120;
+          clone.z = 0;
+          clone.vz = 0;
+          clone.spin = sc.cloneSpin;
+          clone.attack = b.attack * sc.cloneAttackMul; // 依當前攻擊重算（低傷）
+          clone.angle = 0;
+          clone.alive = true;
+          clone.deadAtStep = -1;
+          clone.deathReason = null;
+          clone.cloneUntilT = t + sc.cloneDuration;
+          b.specialReadyT = t + sc.cloneCooldown;
+          b.specialUsesLeft -= 1;
+          events.push({ t, id: b.id, kind: "clone", x: b.px, y: b.py });
+        }
+      }
+      b.prevInRange = inRange;
+    }
   }
 }
 
@@ -583,6 +792,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
   const sw = arena.softWall;
   for (const b of bodies) {
     if (!b.alive) continue;
+    if (b.isClone) continue; // 分身無視牆（不出界、時間到自己 despawn）
 
     // 綠色實體內牆（M 形 Xtreme Line）：內層實體牆，方形場(box)與圓形場皆適用（與 box 解耦）。
     // 撞到沿外法線反彈、保留切向（沿牆滑）；只在「貼地（z ≤ wallHeight）」才阻擋；
@@ -681,6 +891,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
 function checkDeaths(bodies: Body[], arena: ArenaConfig, step: number): void {
   for (const b of bodies) {
     if (!b.alive) continue;
+    if (b.isClone) continue; // 分身免疫擊破/停轉（只靠時間 despawn）
 
     // 血量歸零 → 擊破 KO
     if (b.hp <= 0) {
@@ -712,11 +923,12 @@ function checkDeaths(bodies: Body[], arena: ArenaConfig, step: number): void {
   }
 }
 
-function determineOutcome(bodies: Body[]): {
+function determineOutcome(allBodies: Body[]): {
   winnerId: string | null;
   loserId: string | null;
   reason: WinReason;
 } {
+  const bodies = allBodies.filter((b) => !b.isClone); // 分身不參與勝負
   const alive = bodies.filter((b) => b.alive);
 
   if (alive.length === 1) {
