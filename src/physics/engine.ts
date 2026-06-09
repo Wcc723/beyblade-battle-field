@@ -33,10 +33,10 @@ export const DEFAULT_SPECIAL: SpecialConfig = {
   blastDamage: 300,
 };
 
-/** 血量（耐久條）基準：maxHp = HP_BASE × 重量 */
+/** 血量（耐久條）基準預設：maxHp = hpBase × 重量 */
 export const HP_BASE = 1250;
-export function maxHpFor(stats: BeybladeStats): number {
-  return HP_BASE * Math.max(0.2, stats.weight);
+export function maxHpFor(stats: BeybladeStats, hpBase: number = HP_BASE): number {
+  return hpBase * Math.max(0.2, stats.weight);
 }
 
 /** 內部可變狀態（模擬過程中使用，不對外輸出） */
@@ -85,12 +85,14 @@ export const DEFAULT_ARENA: ArenaConfig = {
   collisionSpinLoss: 0.45,
   knockback: 1.5,
   oppSpinBonus: 1.5,
+  spinKnockback: 0.1,
   wallBounce: 0.7,
   wallSpinLoss: 0.12,
   ringOutSpeed: 190,
   gravity: 900,
   jumpPop: 0.15,
   jumpOverHeight: 34,
+  hpBase: HP_BASE,
 };
 
 export const DEFAULT_SIM: Omit<SimConfig, "arena"> = {
@@ -166,8 +168,8 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
     z: b.z ?? 0,
     vz: 0,
     spin: b.spin,
-    hp: maxHpFor(b.stats),
-    maxHp: maxHpFor(b.stats),
+    hp: maxHpFor(b.stats, arena.hpBase),
+    maxHp: maxHpFor(b.stats, arena.hpBase),
     spinDir: b.spinDir ?? 1,
     angle: 0,
     alive: true,
@@ -394,6 +396,19 @@ function resolveCollisions(
       const pop = impact * arena.jumpPop * clash;
       a.vz += pop;
       b.vz += pop;
+
+      // 轉速擊退加成（夾制之後的額外推力）：攻擊方自旋越高 → 把對手沿法線推得越遠。
+      // 隨自旋衰減而遞減，所以不會像超彈性那樣無限暴衝；係數可在場地後台調。
+      const spinK = arena.spinKnockback ?? 0;
+      if (spinK > 0) {
+        const maxSpin = DEFAULT_SCALES.maxSpin;
+        const aSpinN = Math.max(0, a.spin) / maxSpin; // a 的轉速 → 推 b
+        const bSpinN = Math.max(0, b.spin) / maxSpin; // b 的轉速 → 推 a
+        b.vx += nx * impact * spinK * aSpinN;
+        b.vy += ny * impact * spinK * aSpinN;
+        a.vx -= nx * impact * spinK * bSpinN;
+        a.vy -= ny * impact * spinK * bSpinN;
+      }
 
       // 必殺技【衝擊】：裝備者打出夠猛的一擊 → 機率把對手彈開一段距離 + 造成傷害
       if (impact > sc.blastImpactMin) {

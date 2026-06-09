@@ -682,7 +682,7 @@ function hpPct(id: string): number {
   const f = frameAt();
   const b = f?.bodies.find((x) => x.id === id);
   if (!b) return 0;
-  const maxHp = maxHpFor(getStats(id === "A" ? setupA.preset : setupB.preset));
+  const maxHp = maxHpFor(getStats(id === "A" ? setupA.preset : setupB.preset), arena.value.hpBase);
   return Math.max(0, Math.min(100, (b.hp / maxHp) * 100));
 }
 const teamIds = ["A", "B"];

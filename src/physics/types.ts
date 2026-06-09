@@ -66,6 +66,8 @@ export interface ArenaConfig {
   knockback: number;
   /** 反向旋轉（左右旋對撞）時的傷害 / 擊退加成；同向為 1.0 基準 */
   oppSpinBonus: number;
+  /** 轉速擊退加成：攻擊方自旋（轉速）越高，把對手彈得越遠的係數（0 = 關閉）。可選 */
+  spinKnockback?: number;
   /** 牆壁反彈係數 0~1：撞到場地護牆時的反彈強度 */
   wallBounce: number;
   /** 撞牆造成的自旋（血量）損耗係數 */
@@ -78,6 +80,8 @@ export interface ArenaConfig {
   jumpPop: number;
   /** 掠過高度差：兩者高度差超過此值時，視為一方在空中、不發生碰撞（跳過對手） */
   jumpOverHeight: number;
+  /** 血量基準（耐久條）：每顆 maxHp = hpBase × 重量。可選，未設用引擎預設 HP_BASE */
+  hpBase?: number;
 }
 
 export interface SimConfig {
