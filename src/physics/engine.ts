@@ -25,40 +25,47 @@ import { rimAt, softWallRadiusAt, softWallNormalAt, softWallAccelAt } from "./ar
 
 /** 必殺技數值（集中可調，可被 SimConfig.special 覆寫） */
 export const DEFAULT_SPECIAL: SpecialConfig = {
-  rushChance: 0.35,
+  // rush 突進：降機率/次數 + 大砍衝撞速度與傷害（衝撞才是主要殺傷）
+  rushChance: 0.14,
   rushRange: 110,
-  rushSpeed: 300,
-  rushDamage: 320,
+  rushSpeed: 80,
+  rushDamage: 70,
   rushCooldown: 6.0,
-  rushMaxUses: 3,
-  blastChance: 0.45,
-  blastImpactMin: 70,
-  blastPush: 360,
-  blastDamage: 300,
+  rushMaxUses: 2,
+  // blast 衝擊：靠擊出界贏（對 push/damage 大小不敏感）→ 降機率 + 砍擊退（少擊出界）
+  blastChance: 0.1,
+  blastImpactMin: 90,
+  blastPush: 70,
+  blastDamage: 60,
   blastCooldown: 5.0,
-  blastMaxUses: 4,
+  blastMaxUses: 2,
 
-  dashChance: 0.6,
+  // dash 高速移動：「續命第二風」。回補壓到 ~60（≈多撐 1 秒）、加速更溫和，只是小幫助
+  dashChance: 0.5,
   dashCooldown: 8,
-  dashMaxUses: 3,
-  dashTriggerSpin: 0.45,
-  dashSpinRestore: 1200,
+  dashMaxUses: 1,
+  dashTriggerSpin: 0.3,
+  dashSpinRestore: 60,
   dashDuration: 2.0,
-  dashAccel: 700,
+  dashAccel: 80,
+  dashMaxSpeedMul: 0.45,
 
+  // vortex 旋渦：拉力溫和 + 抽旋壓到 ~45/s（靠拉進來磨而非抽乾）
   vortexChance: 0.55,
   vortexCooldown: 8,
-  vortexMaxUses: 3,
+  vortexMaxUses: 2,
+  vortexSpinDrain: 45,
   vortexRange: 220,
-  vortexPull: 340,
+  vortexPull: 240,
   vortexDuration: 1.6,
 
-  cloneChance: 0.7,
+  // clone 分身：降機率 + 縮短 + 降分身攻擊
+  cloneChance: 0.2,
   cloneCooldown: 10,
   cloneMaxUses: 1,
   cloneRange: 260,
-  cloneDuration: 4.0,
-  cloneAttackMul: 0.45,
+  cloneDuration: 2.0,
+  cloneAttackMul: 0.35,
   cloneSpin: 2000,
   cloneHoming: 280,
 };
@@ -693,13 +700,19 @@ function applySpecials(
 
     // === 持續效果（已發動中）===
     if (t < b.dashUntilT) {
-      // 高速移動：沿目前移動方向額外加速
+      // 高速移動：沿目前移動方向額外加速，但夾住速度上限 → 不會把自己噴出界（續命為主）
       const sp = Math.hypot(b.vx, b.vy) || 1e-6;
       b.vx += (b.vx / sp) * sc.dashAccel * dt;
       b.vy += (b.vy / sp) * sc.dashAccel * dt;
+      const cap = DEFAULT_SCALES.maxSpeed * sc.dashMaxSpeedMul;
+      const sp2 = Math.hypot(b.vx, b.vy);
+      if (sp2 > cap) {
+        b.vx = (b.vx / sp2) * cap;
+        b.vy = (b.vy / sp2) * cap;
+      }
     }
     if (t < b.vortexUntilT) {
-      // 旋渦：把最近對手往自己拉
+      // 旋渦：把最近對手往自己拉 + 持續抽乾對手自旋（削弱，逼對手停轉）
       const opp = nearestEnemy(bodies, b);
       if (opp) {
         const dx = b.px - opp.px;
@@ -707,6 +720,7 @@ function applySpecials(
         const d = Math.hypot(dx, dy) || 1e-6;
         opp.vx += (dx / d) * sc.vortexPull * dt;
         opp.vy += (dy / d) * sc.vortexPull * dt;
+        opp.spin = Math.max(0, opp.spin - sc.vortexSpinDrain * dt);
       }
     }
 
@@ -792,7 +806,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
   const sw = arena.softWall;
   for (const b of bodies) {
     if (!b.alive) continue;
-    if (b.isClone) continue; // 分身無視牆（不出界、時間到自己 despawn）
+    // 分身：照樣吃牆碰撞（被綠牆/邊界擋住 → 不會穿出綠框），只是不會「出界淘汰」（下面的 ring-out 死亡對分身略過、改成當實牆反彈）。
 
     // 綠色實體內牆（M 形 Xtreme Line）：內層實體牆，方形場(box)與圓形場皆適用（與 box 解耦）。
     // 撞到沿外法線反彈、保留切向（沿牆滑）；只在「貼地（z ≤ wallHeight）」才阻擋；
@@ -827,16 +841,16 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
       const nearCornerY = Math.abs(b.py) > H - g;
       const overX = b.px > lim ? 1 : b.px < -lim ? -1 : 0;
       const overY = b.py > lim ? 1 : b.py < -lim ? -1 : 0;
-      // 越過邊界、且落在角落開口（該段沒有牆）→ 出界
-      if ((overX !== 0 && nearCornerY) || (overY !== 0 && nearCornerX)) {
+      // 越過邊界、且落在角落開口（該段沒有牆）→ 出界（分身不出界：略過 → 落到下面當實牆夾回反彈）
+      if (!b.isClone && ((overX !== 0 && nearCornerY) || (overY !== 0 && nearCornerX))) {
         b.alive = false;
         b.deadAtStep = step;
         b.deathReason = "ring-out";
         b.ringOutAngle = Math.atan2(b.py, b.px);
         continue;
       }
-      // 撞到邊牆（非角落開口）→ 反彈：只反射垂直分量、保留切向速度（沿牆滑）
-      if (overX !== 0 && !nearCornerY) {
+      // 撞到邊牆（非角落開口）→ 反彈：只反射垂直分量、保留切向速度（沿牆滑）。分身連角落開口也當實牆。
+      if (overX !== 0 && (!nearCornerY || b.isClone)) {
         b.px = overX > 0 ? lim : -lim;
         const outward = b.vx * overX;
         if (outward > 0) {
@@ -844,7 +858,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
           b.vx = -b.vx * e;
         }
       }
-      if (overY !== 0 && !nearCornerX) {
+      if (overY !== 0 && (!nearCornerX || b.isClone)) {
         b.py = overY > 0 ? lim : -lim;
         const outward = b.vy * overY;
         if (outward > 0) {
@@ -867,8 +881,8 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
     const ang = Math.atan2(b.py, b.px);
     const rp = rimAt(arena, ang);
 
-    // 被打得夠猛 → 衝出護牆，判定出界（記下出界角度供計分分區用）
-    if (radialVel > rp.ringOutSpeed) {
+    // 被打得夠猛 → 衝出護牆，判定出界（記下出界角度供計分分區用）。分身不出界 → 略過，落到下面當實牆反彈。
+    if (radialVel > rp.ringOutSpeed && !b.isClone) {
       b.alive = false;
       b.deadAtStep = step;
       b.deathReason = "ring-out";

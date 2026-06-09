@@ -331,11 +331,15 @@ export interface SpecialConfig {
   dashDuration: number;
   /** 加速期間沿移動方向的額外加速度 */
   dashAccel: number;
+  /** 加速期間速度上限 = maxSpeed × 此倍率（夾住 → 不會把自己噴出界） */
+  dashMaxSpeedMul: number;
 
-  /* —— 旋渦 vortex：對手進範圍觸發 → 持續數秒把對手往自己拉（重型爽） —— */
+  /* —— 旋渦 vortex：對手進範圍觸發 → 持續數秒把對手往自己拉 + 抽乾對手自旋（重型/防禦磨人） —— */
   vortexChance: number;
   vortexCooldown: number;
   vortexMaxUses: number;
+  /** 持續期間每秒抽乾對手的自旋量（削弱：逼對手停轉） */
+  vortexSpinDrain: number;
   /** 對手進入此距離才觸發 */
   vortexRange: number;
   /** 吸引對手的力道 */
