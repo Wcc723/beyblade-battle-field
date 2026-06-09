@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import BattleViz from "./components/BattleViz.vue";
+import MobileBattle from "./components/MobileBattle.vue";
 import ArenaAdmin from "./components/ArenaAdmin.vue";
 import BeybladeAdmin from "./components/BeybladeAdmin.vue";
 
-const view = ref<"battle" | "arena" | "beyblade">("battle");
+const view = ref<"battle" | "mobile" | "arena" | "beyblade">("battle");
 </script>
 
 <template>
@@ -14,6 +15,7 @@ const view = ref<"battle" | "arena" | "beyblade">("battle");
         <h1>⚔️ 戰鬥陀螺 — 物理引擎原型</h1>
         <nav class="tabs">
           <button :class="{ active: view === 'battle' }" @click="view = 'battle'">對戰場</button>
+          <button :class="{ active: view === 'mobile' }" @click="view = 'mobile'">📱 手機版</button>
           <button :class="{ active: view === 'arena' }" @click="view = 'arena'">⚙️ 場地後台</button>
           <button :class="{ active: view === 'beyblade' }" @click="view = 'beyblade'">🌀 陀螺後台</button>
         </nav>
@@ -24,6 +26,7 @@ const view = ref<"battle" | "arena" | "beyblade">("battle");
       </p>
     </header>
     <BattleViz v-if="view === 'battle'" />
+    <MobileBattle v-else-if="view === 'mobile'" />
     <ArenaAdmin v-else-if="view === 'arena'" @go-battle="view = 'battle'" />
     <BeybladeAdmin v-else @go-battle="view = 'battle'" />
   </div>
