@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { simulate, DEFAULT_SCALES, maxHpFor } from "../physics/engine";
-import type { ArenaConfig, BeybladeInit, Frame, SimResult, SpecialKind } from "../physics/types";
+import type { ArenaConfig, BeybladeInit, Frame, SimResult, SpecialKind, SpecialEvent } from "../physics/types";
 import { STAT_PRESETS, PRESET_LABELS } from "../physics/presets";
 import { getActiveConfig, activePresetName, presets, activeId, setActive } from "../store/arenaStore";
 import { rimScoreAt } from "../physics/arena";
@@ -285,6 +285,7 @@ function runServerSimulation() {
     special: { ...special }, // 必殺技數值（陀螺後台可調）
   });
   playhead.value = 0;
+  resetFreeze();
   phase.value = "playing";
   play();
 }
@@ -320,6 +321,17 @@ const slowmo = ref(false);
 const SLOWMO_WINDOW = 0.9; // 終結後 0.9 秒內放慢
 const SLOWMO_FACTOR = 0.3; // 放慢到 0.3 倍
 
+// 必殺技停格：跨過必殺事件時凍結畫面一下，讓人看清是什麼招
+const FREEZE_MS = 360;
+let freezeUntil = 0;
+let lastFreezeT = -1;
+const freezeEvent = ref<SpecialEvent | null>(null);
+function resetFreeze() {
+  freezeUntil = 0;
+  lastFreezeT = -1;
+  freezeEvent.value = null;
+}
+
 function slowmoMul(curT: number): number {
   const cues = result.value?.slowmoCues;
   if (!cues) return 1;
@@ -336,10 +348,26 @@ function tick(now: number) {
   const dtMs = now - lastT;
   lastT = now;
   if (frames) {
-    const curT = playhead.value / 60; // dt=1/60、sampleEvery=1 → 幀索引即 t*60
-    const mul = slowmoMul(curT);
+    // 必殺技停格中 → 凍結（不前進），畫面持續重繪以顯示停格 banner
+    if (now < freezeUntil) {
+      draw();
+      raf = requestAnimationFrame(tick);
+      return;
+    }
+    if (freezeEvent.value) freezeEvent.value = null;
+    const curT0 = playhead.value / 60; // dt=1/60、sampleEvery=1 → 幀索引即 t*60
+    const mul = slowmoMul(curT0);
     slowmo.value = mul < 1;
     playhead.value += (dtMs / 1000) * 60 * speed.value * mul;
+    const curT1 = playhead.value / 60;
+    // 跨過必殺技事件 → snap 到該時刻並停格
+    const ev = result.value!.specialEvents.find((e) => e.t > curT0 && e.t <= curT1 && e.t !== lastFreezeT);
+    if (ev) {
+      playhead.value = ev.t * 60;
+      freezeUntil = now + FREEZE_MS;
+      lastFreezeT = ev.t;
+      freezeEvent.value = ev;
+    }
     if (playhead.value >= frames.length - 1) {
       playhead.value = frames.length - 1;
       playing.value = false;
@@ -355,7 +383,10 @@ function tick(now: number) {
 function play() {
   const frames = result.value?.frames;
   if (!frames) return;
-  if (playhead.value >= frames.length - 1) playhead.value = 0;
+  if (playhead.value >= frames.length - 1) {
+    playhead.value = 0;
+    resetFreeze(); // 從頭重播 → 必殺停格可再次觸發
+  }
   playing.value = true;
   lastT = performance.now();
   raf = requestAnimationFrame(tick);
@@ -484,6 +515,109 @@ function presetOf(id: string): string {
   return id === "A" ? setupA.preset : setupB.preset;
 }
 
+/* ---------- 回放特效（純由 curT 推導 → 重播/變速/scrub 都穩、確定性） ---------- */
+/** 確定性 hash → [0,1)：讓火花/碎片方向穩定、不隨機抖動。 */
+function hash01(n: number): number {
+  const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/** 碰撞火花：強弱依 impact（門檻調低 → 同力道更猛），衝擊波環 + 發光爆閃 + 放射火花。 */
+function drawSparks(g: CanvasRenderingContext2D, curT: number) {
+  const evs = result.value?.collisionEvents;
+  if (!evs) return;
+  const DUR = 0.34;
+  for (let k = 0; k < evs.length; k++) {
+    const ce = evs[k];
+    const age = curT - ce.t;
+    if (age < 0 || age >= DUR) continue;
+    const a = age / DUR;
+    const s = Math.min(1, ce.impact / 260); // 撞擊強度 0~1
+    const [ex, ey] = toCanvas(ce.x, ce.y);
+    g.save();
+    g.lineCap = "round";
+    // 衝擊波環（夠猛才有，白色擴張環）
+    if (s > 0.3) {
+      g.globalAlpha = (1 - a) * 0.55 * s;
+      g.strokeStyle = "#fff";
+      g.lineWidth = scaleLen(3.5) * (1 - a);
+      g.beginPath();
+      g.arc(ex, ey, scaleLen(6) + scaleLen(10 + s * 60) * a, 0, Math.PI * 2);
+      g.stroke();
+    }
+    // 中心爆閃（白 + 暖色光暈）
+    g.shadowColor = "#ffd24d";
+    g.shadowBlur = 18 * s;
+    g.globalAlpha = (1 - a) * (0.55 + 0.45 * s);
+    g.fillStyle = "#fff";
+    g.beginPath();
+    g.arc(ex, ey, scaleLen(4 + s * 11) * (1 - a * 0.55), 0, Math.PI * 2);
+    g.fill();
+    g.shadowBlur = 0;
+    // 放射火花（更多 8~24 條、更長、白→橙→紅）
+    const n = 8 + Math.floor(s * 16);
+    const reach = scaleLen(18 + s * 58);
+    for (let i = 0; i < n; i++) {
+      const ang = hash01(k * 41.7 + i * 2.3) * Math.PI * 2;
+      const spd = 0.5 + hash01(k * 13.1 + i * 5.7) * 0.5;
+      const d0 = reach * a * spd;
+      const len = scaleLen(6 + s * 14) * (1 - a) * (0.6 + spd * 0.4);
+      const c = Math.cos(ang);
+      const sn = Math.sin(ang);
+      g.globalAlpha = (1 - a) * (0.78 + 0.22 * s);
+      const r = hash01(k * 7.3 + i);
+      g.strokeStyle = r < 0.4 ? "#ffffff" : r < 0.75 ? "#ffcf5a" : "#ff8a3c";
+      g.lineWidth = (1.8 + s * 1.8) * (1 - a * 0.4);
+      g.beginPath();
+      g.moveTo(ex + c * d0, ey + sn * d0);
+      g.lineTo(ex + c * (d0 + len), ey + sn * (d0 + len));
+      g.stroke();
+    }
+    g.restore();
+  }
+}
+
+/** 擊破爆裂：ko 時白光環擴張 + 碎片噴飛（出界/停轉走慢動作、不爆）。 */
+function drawDeaths(g: CanvasRenderingContext2D, curT: number) {
+  const evs = result.value?.deathEvents;
+  if (!evs) return;
+  const DUR = 0.7;
+  for (let k = 0; k < evs.length; k++) {
+    const de = evs[k];
+    if (de.reason !== "ko") continue;
+    const age = curT - de.t;
+    if (age < 0 || age >= DUR) continue;
+    const a = age / DUR;
+    const [ex, ey] = toCanvas(de.x, de.y);
+    const col = colorOf(de.id);
+    g.save();
+    g.globalAlpha = (1 - a) * 0.85; // 衝擊白光環
+    g.strokeStyle = "#fff";
+    g.lineWidth = Math.max(1, scaleLen(7) * (1 - a));
+    g.beginPath();
+    g.arc(ex, ey, scaleLen(16 + a * 86), 0, Math.PI * 2);
+    g.stroke();
+    g.globalAlpha = Math.max(0, 1 - a * 2.4); // 內爆閃光
+    g.fillStyle = "#fff";
+    g.beginPath();
+    g.arc(ex, ey, scaleLen(28) * (1 - a), 0, Math.PI * 2);
+    g.fill();
+    const n = 16; // 碎片噴飛（陀螺顏色）
+    g.fillStyle = col;
+    for (let i = 0; i < n; i++) {
+      const ang = hash01(k * 91.3 + i * 3.1) * Math.PI * 2;
+      const spd = 0.45 + hash01(k * 57.7 + i * 7.9) * 0.55;
+      const d = scaleLen(18 + 130 * spd) * a;
+      const sz = scaleLen(2 + hash01(k * 7.3 + i) * 4) * (1 - a);
+      g.globalAlpha = (1 - a) * 0.95;
+      g.beginPath();
+      g.arc(ex + Math.cos(ang) * d, ey + Math.sin(ang) * d, Math.max(0.5, sz), 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+}
+
 function draw() {
   if (!ctx) return;
   const g = ctx;
@@ -533,27 +667,52 @@ function draw() {
       drawTop(g, b.x, b.y, b.z ?? 0, b.angle, col, 26, b.alive, presetOf(b.id));
     }
 
-    // 必殺技發動特效（光環 + 文字）
+    // 碰撞火花 + 擊破爆裂
     const curT = ph / 60;
+    drawSparks(g, curT);
+    drawDeaths(g, curT);
+
+    // 必殺技發動特效：擴張光環（持續 0.55s）
     for (const ev of result.value.specialEvents) {
       const dtv = curT - ev.t;
-      if (dtv < 0 || dtv > 0.5) continue;
+      if (dtv < 0 || dtv > 0.55) continue;
       const fb = frame.bodies.find((x) => x.id === ev.id);
       if (!fb) continue;
       const [ex, ey] = toCanvas(fb.x, fb.y);
-      const prog = dtv / 0.5;
+      const prog = dtv / 0.55;
       const ecol = ev.kind === "blast" ? "#ffce4d" : colorOf(ev.id);
       g.save();
-      g.globalAlpha = 1 - prog;
+      g.globalAlpha = (1 - prog) * 0.9;
       g.strokeStyle = ecol;
       g.lineWidth = 4;
       g.beginPath();
-      g.arc(ex, ey, scaleLen(26) + prog * 64, 0, Math.PI * 2);
+      g.arc(ex, ey, scaleLen(26) + prog * 70, 0, Math.PI * 2);
       g.stroke();
-      g.fillStyle = ecol;
-      g.font = "bold 20px system-ui";
+      g.restore();
+    }
+
+    // 必殺技停格 banner：大字招式名（停格期間顯示，讓人看清是什麼招）
+    if (freezeEvent.value) {
+      const ev = freezeEvent.value;
+      const name = ev.kind === "blast" ? "衝　擊" : "突　進";
+      const ecol = ev.kind === "blast" ? "#ffce4d" : colorOf(ev.id);
+      g.save();
+      g.globalAlpha = 0.16;
+      g.fillStyle = "#05080d";
+      g.fillRect(0, 0, SIZE, SIZE);
+      g.globalAlpha = 1;
       g.textAlign = "center";
-      g.fillText(ev.kind === "blast" ? "衝擊!" : "突進!", ex, ey - scaleLen(26) - 16 - prog * 28);
+      g.textBaseline = "middle";
+      g.font = "900 56px system-ui, sans-serif";
+      g.lineWidth = 8;
+      g.strokeStyle = "rgba(5,8,13,0.92)";
+      g.strokeText(name, SIZE / 2, SIZE * 0.2);
+      g.fillStyle = ecol;
+      g.fillText(name, SIZE / 2, SIZE * 0.2);
+      g.font = "bold 16px system-ui";
+      g.fillStyle = "#aebbd4";
+      g.fillText(colorOf(ev.id) === setupA.color ? "紅方 必殺技!" : "藍方 必殺技!", SIZE / 2, SIZE * 0.2 + 42);
+      g.textBaseline = "alphabetic";
       g.restore();
     }
     return;
@@ -669,6 +828,15 @@ function isFinished(): boolean {
   return !!frames && !playing.value && Math.round(playhead.value) >= frames.length - 1;
 }
 
+/** 必殺技觸發說明（讀陀螺後台目前數值）：條件 · 機率 · 冷卻 · 每回合次數。 */
+function specialInfo(kind: "" | SpecialKind): string {
+  if (kind === "rush")
+    return `逼近觸發 · ${Math.round(special.rushChance * 100)}% · 冷卻 ${special.rushCooldown}s · 每回合 ${special.rushMaxUses} 次`;
+  if (kind === "blast")
+    return `猛擊觸發 · ${Math.round(special.blastChance * 100)}% · 冷卻 ${special.blastCooldown}s · 每回合 ${special.blastMaxUses} 次`;
+  return "";
+}
+
 /** 對戰場直接切換場地（含綠牆場 / 一般場）→ 套用並重開一局。 */
 function selectArena(e: Event) {
   setActive((e.target as HTMLSelectElement).value);
@@ -720,6 +888,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
             <option value="blast">衝擊</option>
           </select>
         </label>
+        <p v-if="setupA.special" class="sp-info">⚡ {{ specialInfo(setupA.special) }}</p>
       </div>
 
       <div class="player-card" :class="{ dim: phase === 'aim-A' }" :style="{ borderColor: setupB.color }">
@@ -742,6 +911,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
             <option value="blast">衝擊</option>
           </select>
         </label>
+        <p v-if="setupB.special" class="sp-info">⚡ {{ specialInfo(setupB.special) }}</p>
       </div>
 
       <label class="arena-info">場地：
@@ -881,6 +1051,15 @@ onBeforeUnmount(() => cancelAnimationFrame(raf));
 .ready {
   font-size: 12px;
   color: #6ad08a;
+}
+.sp-info {
+  margin: -2px 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--panel-2);
+  border-radius: 7px;
+  padding: 5px 8px;
 }
 .field {
   display: flex;

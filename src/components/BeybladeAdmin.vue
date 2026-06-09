@@ -9,16 +9,19 @@ defineEmits<{ (e: "go-battle"): void }>();
 type SpField = { key: keyof SpecialConfig; label: string; min: number; max: number; step: number };
 const RUSH_FIELDS: SpField[] = [
   { key: "rushChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
+  { key: "rushCooldown", label: "冷卻(秒)", min: 0.5, max: 30, step: 0.5 },
+  { key: "rushMaxUses", label: "每回合次數", min: 1, max: 9, step: 1 },
+  { key: "rushRange", label: "觸發距離", min: 40, max: 250, step: 10 },
   { key: "rushDamage", label: "傷害", min: 0, max: 1200, step: 50 },
   { key: "rushSpeed", label: "加速量", min: 0, max: 600, step: 20 },
-  { key: "rushRange", label: "觸發距離", min: 40, max: 250, step: 10 },
-  { key: "rushCooldown", label: "冷卻(秒)", min: 0.5, max: 5, step: 0.25 },
 ];
 const BLAST_FIELDS: SpField[] = [
   { key: "blastChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
+  { key: "blastCooldown", label: "冷卻(秒)", min: 0.2, max: 30, step: 0.5 },
+  { key: "blastMaxUses", label: "每回合次數", min: 1, max: 9, step: 1 },
+  { key: "blastImpactMin", label: "撞擊門檻", min: 50, max: 400, step: 10 },
   { key: "blastDamage", label: "傷害", min: 0, max: 1000, step: 50 },
   { key: "blastPush", label: "彈開力道", min: 0, max: 700, step: 20 },
-  { key: "blastImpactMin", label: "撞擊門檻", min: 50, max: 400, step: 10 },
 ];
 function onSpecial() {
   persistSpecial();
@@ -82,7 +85,10 @@ function onInput() {
     <div class="special-grid">
       <div class="special-card">
         <h4>🗡️ 衝刺突進</h4>
-        <p class="sp-hint">逼近對手時機率發動：朝對手爆發加速 + 直接扣血。</p>
+        <p class="sp-hint">
+          <b>觸發</b>：逼近對手（進入觸發距離 {{ special.rushRange }}）時，以 {{ Math.round(special.rushChance * 100) }}% 機率發動 → 朝對手爆發加速衝撞 + 直接扣血。<br />
+          <b>限制</b>：發動後冷卻 <b>{{ special.rushCooldown }}s</b>、每回合最多 <b>{{ special.rushMaxUses }}</b> 次。
+        </p>
         <div class="sp-grid">
           <label v-for="f in RUSH_FIELDS" :key="f.key" class="field">
             <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
@@ -92,7 +98,10 @@ function onInput() {
       </div>
       <div class="special-card">
         <h4>💥 衝擊</h4>
-        <p class="sp-hint">打出夠猛的一擊時，機率把對手彈開一段距離 + 造成傷害（可順勢擊出界）。</p>
+        <p class="sp-hint">
+          <b>觸發</b>：自己打出的撞擊強度 &gt; {{ special.blastImpactMin }} 時，以 {{ Math.round(special.blastChance * 100) }}% 機率發動 → 把對手彈開 + 扣血（可順勢擊出界）。<br />
+          <b>限制</b>：發動後冷卻 <b>{{ special.blastCooldown }}s</b>、每回合最多 <b>{{ special.blastMaxUses }}</b> 次。
+        </p>
         <div class="sp-grid">
           <label v-for="f in BLAST_FIELDS" :key="f.key" class="field">
             <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>

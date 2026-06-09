@@ -16,6 +16,8 @@ import type {
   SpecialConfig,
   SpecialEvent,
   SpecialKind,
+  CollisionEvent,
+  DeathEvent,
   WinReason,
 } from "./types";
 import { makeRng } from "./prng";
@@ -23,15 +25,18 @@ import { rimAt, softWallRadiusAt, softWallNormalAt, softWallAccelAt } from "./ar
 
 /** 必殺技數值（集中可調，可被 SimConfig.special 覆寫） */
 export const DEFAULT_SPECIAL: SpecialConfig = {
-  rushChance: 0.2,
+  rushChance: 0.35,
   rushRange: 110,
   rushSpeed: 300,
   rushDamage: 320,
-  rushCooldown: 2.0,
-  blastChance: 0.35,
+  rushCooldown: 6.0,
+  rushMaxUses: 3,
+  blastChance: 0.45,
   blastImpactMin: 70,
   blastPush: 360,
   blastDamage: 300,
+  blastCooldown: 5.0,
+  blastMaxUses: 4,
 };
 
 /** 血量（耐久條）基準預設：maxHp = hpBase × 重量 */
@@ -65,7 +70,10 @@ interface Body {
   deathReason: WinReason | null;
   special: SpecialKind | "";
   prevInRange: boolean;
-  rushReadyT: number;
+  /** 必殺技冷卻：到此時間（秒）才可再次發動 */
+  specialReadyT: number;
+  /** 必殺技本回合剩餘可用次數 */
+  specialUsesLeft: number;
   ringOutAngle: number;
 }
 
@@ -190,6 +198,7 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
   const dt = config.dt;
   const sampleEvery = Math.max(1, Math.floor(config.sampleEvery ?? 1));
   const maxSteps = Math.max(1, Math.ceil(config.maxTime / dt));
+  const sc: SpecialConfig = { ...DEFAULT_SPECIAL, ...config.special };
 
   const bodies: Body[] = inits.map((b) => ({
     id: b.id,
@@ -215,15 +224,17 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
     deathReason: null,
     special: b.special ?? "",
     prevInRange: false,
-    rushReadyT: 0,
+    specialReadyT: 0,
+    specialUsesLeft: b.special === "rush" ? sc.rushMaxUses : b.special === "blast" ? sc.blastMaxUses : 0,
     ringOutAngle: NaN,
   }));
 
   const frames: Frame[] = [snapshot(0, bodies)];
   const slowmoCues: number[] = [];
   const specialEvents: SpecialEvent[] = [];
+  const collisionEvents: CollisionEvent[] = [];
+  const deathEvents: DeathEvent[] = [];
   const rng = makeRng(config.seed ?? 1);
-  const sc: SpecialConfig = { ...DEFAULT_SPECIAL, ...config.special };
   const followSteps = Math.max(0, Math.round((config.followThroughTime ?? 0) / dt));
   let step = 0;
   let t = 0;
@@ -233,18 +244,20 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
   for (step = 1; step <= maxSteps; step++) {
     t = step * dt;
     integrate(bodies, arena, dt);
-    resolveCollisions(bodies, arena, sc, rng, t, specialEvents);
+    resolveCollisions(bodies, arena, sc, rng, t, specialEvents, collisionEvents);
     resolveWalls(bodies, arena, step);
     applySpecials(bodies, sc, rng, t, specialEvents);
     checkDeaths(bodies, arena, step);
 
-    // 慢動作只在「終結瞬間」觸發：本步發生淘汰（出界 / 停轉）
+    // 本步發生淘汰（出界 / 停轉 / 擊破）→ 記錄死亡事件（特效）+ 觸發慢動作
+    let diedThisStep = false;
     for (const b of bodies) {
       if (b.deadAtStep === step) {
-        slowmoCues.push(t);
-        break;
+        diedThisStep = true;
+        deathEvents.push({ t, id: b.id, x: b.px, y: b.py, reason: (b.deathReason ?? "ko") as DeathEvent["reason"] });
       }
     }
+    if (diedThisStep) slowmoCues.push(t);
 
     if (step % sampleEvery === 0) frames.push(snapshot(t, bodies));
 
@@ -281,6 +294,8 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
     duration: t,
     slowmoCues,
     specialEvents,
+    collisionEvents,
+    deathEvents,
     ringOutAngle,
   };
 }
@@ -396,6 +411,7 @@ function resolveCollisions(
   rng: () => number,
   t: number,
   events: SpecialEvent[],
+  collisionEvents: CollisionEvent[],
 ): void {
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
@@ -468,6 +484,11 @@ function resolveCollisions(
       a.hp -= dmg * clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4);
       b.hp -= dmg * clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4);
 
+      // 接觸點（a 表面朝 b）→ 火花特效定位；只記「夠猛」的撞擊，避免摩擦微震洗版
+      const cx = a.px + nx * a.radius;
+      const cy = a.py + ny * a.radius;
+      if (impact > 25) collisionEvents.push({ t, x: cx, y: cy, impact });
+
       // 猛烈碰撞把雙方頂向空中（2.5D 彈跳）
       const pop = impact * arena.jumpPop * clash;
       a.vz += pop;
@@ -486,21 +507,25 @@ function resolveCollisions(
         a.vy -= ny * impact * spinK * bSpinN;
       }
 
-      // 必殺技【衝擊】：裝備者打出夠猛的一擊 → 機率把對手彈開一段距離 + 造成傷害
+      // 必殺技【衝擊】：裝備者打出夠猛的一擊（impact>門檻）+ 過冷卻 + 本回合還有次數 → 機率把對手彈開 + 扣血
       if (impact > sc.blastImpactMin) {
         // a 衝擊 b：把 b 沿法線（遠離 a）方向彈開
-        if (a.special === "blast" && b.alive && rng() < sc.blastChance) {
+        if (a.special === "blast" && b.alive && t >= a.specialReadyT && a.specialUsesLeft > 0 && rng() < sc.blastChance) {
           b.vx += nx * sc.blastPush;
           b.vy += ny * sc.blastPush;
           b.hp -= sc.blastDamage;
-          events.push({ t, id: a.id, kind: "blast" });
+          a.specialReadyT = t + sc.blastCooldown;
+          a.specialUsesLeft -= 1;
+          events.push({ t, id: a.id, kind: "blast", x: cx, y: cy });
         }
         // b 衝擊 a：把 a 沿 -法線（遠離 b）方向彈開
-        if (b.special === "blast" && a.alive && rng() < sc.blastChance) {
+        if (b.special === "blast" && a.alive && t >= b.specialReadyT && b.specialUsesLeft > 0 && rng() < sc.blastChance) {
           a.vx -= nx * sc.blastPush;
           a.vy -= ny * sc.blastPush;
           a.hp -= sc.blastDamage;
-          events.push({ t, id: b.id, kind: "blast" });
+          b.specialReadyT = t + sc.blastCooldown;
+          b.specialUsesLeft -= 1;
+          events.push({ t, id: b.id, kind: "blast", x: cx, y: cy });
         }
       }
     }
@@ -529,8 +554,8 @@ function applySpecials(bodies: Body[], sc: SpecialConfig, rng: () => number, t: 
       }
     }
     const inRange = opp !== null && best < sc.rushRange;
-    // 只在「剛進入射程」且過了冷卻時擲骰
-    if (inRange && opp && !b.prevInRange && t >= b.rushReadyT) {
+    // 觸發＝剛進入射程 + 過了冷卻 + 本回合還有次數 → 再擲機率
+    if (inRange && opp && !b.prevInRange && t >= b.specialReadyT && b.specialUsesLeft > 0) {
       if (rng() < sc.rushChance) {
         const dx = opp.px - b.px;
         const dy = opp.py - b.py;
@@ -538,10 +563,11 @@ function applySpecials(bodies: Body[], sc: SpecialConfig, rng: () => number, t: 
         b.vx += (dx / d) * sc.rushSpeed;
         b.vy += (dy / d) * sc.rushSpeed;
         opp.hp -= sc.rushDamage; // 直接傷害
-        b.rushReadyT = t + sc.rushCooldown;
-        events.push({ t, id: b.id, kind: "rush" });
+        b.specialReadyT = t + sc.rushCooldown;
+        b.specialUsesLeft -= 1;
+        events.push({ t, id: b.id, kind: "rush", x: b.px, y: b.py });
       } else {
-        b.rushReadyT = t + 0.5; // 沒中也短暫冷卻，避免邊界抖動狂擲
+        b.specialReadyT = t + 0.5; // 沒中也短暫冷卻，避免邊界抖動狂擲（不耗次數）
       }
     }
     b.prevInRange = inRange;

@@ -262,9 +262,31 @@ export interface SpecialEvent {
   t: number;
   id: string;
   kind: SpecialKind;
+  /** 發動位置（世界座標），供停格特效定位 */
+  x: number;
+  y: number;
 }
 
-/** 必殺技數值（集中可調，每招獨立設定） */
+/** 碰撞事件（供回放火花特效用，強度依 impact） */
+export interface CollisionEvent {
+  t: number;
+  /** 接觸點（世界座標） */
+  x: number;
+  y: number;
+  /** 撞擊強度（沿法線接近速度）→ 決定火花強弱 */
+  impact: number;
+}
+
+/** 淘汰事件（供回放擊破/出界特效用） */
+export interface DeathEvent {
+  t: number;
+  id: string;
+  x: number;
+  y: number;
+  reason: "ring-out" | "spin-out" | "ko";
+}
+
+/** 必殺技數值（集中可調，每招獨立設定）。觸發模型＝冷卻 + 每回合限次 + 機率。 */
 export interface SpecialConfig {
   /** 衝刺：觸發機率 0~1 */
   rushChance: number;
@@ -276,6 +298,8 @@ export interface SpecialConfig {
   rushDamage: number;
   /** 衝刺：發動後冷卻秒數 */
   rushCooldown: number;
+  /** 衝刺：每回合最多發動次數 */
+  rushMaxUses: number;
   /** 衝擊：觸發機率 0~1 */
   blastChance: number;
   /** 衝擊：撞擊強度門檻（夠猛的一擊才觸發） */
@@ -284,6 +308,10 @@ export interface SpecialConfig {
   blastPush: number;
   /** 衝擊：對對手造成的血量傷害 */
   blastDamage: number;
+  /** 衝擊：發動後冷卻秒數 */
+  blastCooldown: number;
+  /** 衝擊：每回合最多發動次數 */
+  blastMaxUses: number;
 }
 
 export type WinReason = "ring-out" | "spin-out" | "timeout" | "draw" | "ko";
@@ -306,6 +334,10 @@ export interface SimResult {
   slowmoCues: number[];
   /** 必殺技發動事件（供回放特效） */
   specialEvents: SpecialEvent[];
+  /** 碰撞事件（供回放火花特效，強度依 impact） */
+  collisionEvents: CollisionEvent[];
+  /** 淘汰事件（供回放擊破/出界特效） */
+  deathEvents: DeathEvent[];
   /** 出界角度（弧度，僅 ring-out 時有值），供「落點分區計分」用 */
   ringOutAngle: number | null;
 }

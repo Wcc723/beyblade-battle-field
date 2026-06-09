@@ -608,6 +608,67 @@ describe("綠色加速區 (Xtreme Dash)", () => {
   });
 });
 
+describe("回放特效事件 (碰撞/淘汰)", () => {
+  it("碰撞 → collisionEvents(含位置/impact>25)；停轉 → deathEvents(含 reason)", () => {
+    const r = simulate(
+      [
+        body({ id: "A", position: { x: -40, y: 0 }, velocity: { x: 300, y: 0 }, spin: 200, radius: 20 }), // 低自旋→停轉
+        body({ id: "B", position: { x: 40, y: 0 }, velocity: { x: -300, y: 0 }, spin: 3000, radius: 20 }),
+      ],
+      { dt: 1 / 60, maxTime: 8, arena: DEFAULT_ARENA },
+    );
+    expect(r.collisionEvents.length).toBeGreaterThan(0);
+    const ce = r.collisionEvents[0];
+    expect(ce.impact).toBeGreaterThan(25);
+    expect(Number.isFinite(ce.x) && Number.isFinite(ce.y)).toBe(true);
+    expect(r.deathEvents.length).toBeGreaterThan(0);
+    expect(["ring-out", "spin-out", "ko"]).toContain(r.deathEvents.at(-1)!.reason);
+  });
+  it("確定性：同 seed → collisionEvents / deathEvents 逐位元一致", () => {
+    const mk = () =>
+      simulate(
+        [
+          body({ id: "A", position: { x: -40, y: 0 }, velocity: { x: 280, y: 30 }, spin: 5000, radius: 20 }),
+          body({ id: "B", position: { x: 40, y: 0 }, velocity: { x: -280, y: -30 }, spin: 5000, radius: 20 }),
+        ],
+        { dt: 1 / 60, maxTime: 5, arena: DEFAULT_ARENA, seed: 9 },
+      );
+    const a = mk(), b = mk();
+    expect(JSON.stringify(a.collisionEvents)).toBe(JSON.stringify(b.collisionEvents));
+    expect(JSON.stringify(a.deathEvents)).toBe(JSON.stringify(b.deathEvents));
+  });
+});
+
+describe("必殺技：冷卻 + 每回合限次", () => {
+  // 小場、不出界、慢衰減 → 兩顆被困在小環裡反覆對撞；blastPush/Damage=0 不分開不死 → 純測「次數上限」
+  const tight = neutralArena({ radius: 60, centerPull: 150, swirl: 15, ringOutSpeed: 1e9, friction: 0.3, spinDecayBase: 4 });
+  const countBlasts = (maxUses: number) =>
+    simulate(
+      [
+        body({ id: "A", position: { x: -25, y: 0 }, velocity: { x: 200, y: 60 }, spin: 5000, radius: 20, special: "blast" }),
+        body({ id: "B", position: { x: 25, y: 0 }, velocity: { x: -200, y: -60 }, spin: 5000, radius: 20 }),
+      ],
+      {
+        dt: 1 / 60,
+        maxTime: 6,
+        arena: tight,
+        seed: 4,
+        special: { blastChance: 1, blastMaxUses: maxUses, blastImpactMin: 20, blastPush: 0, blastDamage: 0, blastCooldown: 0.05 },
+      },
+    ).specialEvents.filter((e) => e.kind === "blast" && e.id === "A").length;
+
+  it("無上限會多次發動（同場景作為對照）", () => {
+    expect(countBlasts(99)).toBeGreaterThan(1);
+  });
+  it("blastMaxUses=1 → 只發動一次（上限生效）", () => {
+    expect(countBlasts(1)).toBe(1);
+  });
+  it("blastMaxUses=3 → 最多 3 次", () => {
+    expect(countBlasts(3)).toBeLessThanOrEqual(3);
+    expect(countBlasts(3)).toBeGreaterThan(0);
+  });
+});
+
 describe("基本輸出形狀", () => {
   it("frames 連續、結果欄位齊全", () => {
     const arena = DEFAULT_ARENA;
