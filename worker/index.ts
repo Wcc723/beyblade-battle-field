@@ -6,20 +6,57 @@
  * - 其餘    → Workers static assets 直接出（SPA fallback 回 index.html）
  *
  * 之後階段：
- * - Phase 2: /api/auth/*（Google OAuth）、/api/me
- * - Phase 3: /api/settings、/api/admin/*（D1）
+ * - Phase 3: /api/settings、/api/admin/*（D1 全域設定 CRUD）
  * - Phase 4: /api/room/*（轉發 Battle Room Durable Object）
  * - Phase 5: /api/lobby（轉發 Lobby Durable Object）
  */
+import { handleLogin, handleCallback, handleLogout, isAdminEmail } from "./auth";
+import { getSession } from "./session";
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
+    const path = url.pathname;
 
-    if (url.pathname === "/api/health") {
+    if (path === "/api/health") {
       return Response.json({ ok: true, service: "beyblade-battle-field" });
     }
 
-    if (url.pathname.startsWith("/api/")) {
+    // --- 認證 ---
+    // 設定缺漏要早爆且指名（部署漏打 wrangler secret put 時，不要讓使用者
+    // 走完 Google 流程才在最後一步 500 / 或帶 client_id=undefined 去 Google）
+    if (path.startsWith("/api/auth/")) {
+      const missing = (["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SESSION_SECRET"] as const).filter(
+        (k) => !env[k],
+      );
+      if (missing.length) {
+        console.error(`缺少必要設定：${missing.join(", ")}（本地放 .env；部署用 wrangler secret put）`);
+        return Response.json({ error: "server_misconfigured", missing }, { status: 503 });
+      }
+    }
+    if (path === "/api/auth/login" && request.method === "GET") return handleLogin(request, env);
+    if (path === "/api/auth/callback" && request.method === "GET") return handleCallback(request, env);
+    if (path === "/api/auth/logout" && request.method === "POST") return handleLogout(request);
+
+    if (path === "/api/me") {
+      const session = await getSession(request, env.SESSION_SECRET);
+      if (!session) return Response.json({ user: null, isAdmin: false });
+      return Response.json({
+        user: { email: session.email, name: session.name, picture: session.picture },
+        isAdmin: isAdminEmail(session.email, env),
+      });
+    }
+
+    // --- 管理員區（真閘門在這裡，前端隱藏入口只是 UX）---
+    if (path.startsWith("/api/admin/")) {
+      const session = await getSession(request, env.SESSION_SECRET);
+      if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
+      if (!isAdminEmail(session.email, env)) return Response.json({ error: "forbidden" }, { status: 403 });
+      if (path === "/api/admin/ping") return Response.json({ ok: true, admin: session.email });
+      return Response.json({ error: "not_found" }, { status: 404 });
+    }
+
+    if (path.startsWith("/api/")) {
       return Response.json({ error: "not_found" }, { status: 404 });
     }
 

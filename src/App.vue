@@ -1,5 +1,17 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from "vue-router";
+import { onMounted } from "vue";
+import { RouterLink, RouterView, useRouter } from "vue-router";
+import { useAuth } from "./store/authStore";
+
+const auth = useAuth();
+const router = useRouter();
+
+onMounted(() => auth.ensureLoaded());
+
+async function onLogout() {
+  await auth.logout();
+  router.push("/login");
+}
 </script>
 
 <template>
@@ -10,11 +22,24 @@ import { RouterLink, RouterView } from "vue-router";
         <nav class="tabs">
           <RouterLink to="/">🏟️ 大廳</RouterLink>
           <RouterLink to="/settings">👤 個人設定</RouterLink>
-          <RouterLink to="/admin/arena">⚙️ 場地後台</RouterLink>
-          <RouterLink to="/admin/beyblade">🌀 陀螺後台</RouterLink>
           <RouterLink to="/test/battle">🧪 測試對戰</RouterLink>
           <RouterLink to="/test/mobile">📱 測試手機版</RouterLink>
+          <!-- 管理員分頁放最後：載入完才插入，不會把其他分頁往右推 -->
+          <template v-if="auth.isAdmin.value">
+            <RouterLink to="/admin/arena">⚙️ 場地後台</RouterLink>
+            <RouterLink to="/admin/beyblade">🌀 陀螺後台</RouterLink>
+          </template>
         </nav>
+        <!-- 等 /api/me 回來再渲染，避免已登入者先閃一下「登入」鈕 -->
+        <div class="auth-box" v-if="auth.loaded.value">
+          <template v-if="auth.user.value">
+            <img v-if="auth.user.value.picture" :src="auth.user.value.picture" class="avatar" alt="" referrerpolicy="no-referrer" />
+            <span class="uname">{{ auth.user.value.name || auth.user.value.email }}</span>
+            <button class="logout" @click="onLogout">登出</button>
+          </template>
+          <RouterLink v-else class="login-link" to="/login">登入</RouterLink>
+        </div>
+        <div class="auth-box" v-else></div>
       </div>
     </header>
     <RouterView />
@@ -81,5 +106,40 @@ body {
   background: var(--accent);
   color: #1a1207;
   border-color: var(--accent);
+}
+.auth-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+}
+.uname {
+  color: var(--muted);
+  font-size: 13px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.logout,
+.login-link {
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.logout:hover,
+.login-link:hover {
+  color: var(--text);
 }
 </style>

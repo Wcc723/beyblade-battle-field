@@ -11,9 +11,27 @@
   },
   "observability": {
     "enabled": true
-  }
+  },
+  // 非秘密環境變數（本地開發時 .env 會覆寫）。
+  // 部署前必打三個 secret（wrangler deploy 不會上傳 .env）：
+  //   wrangler secret put GOOGLE_CLIENT_ID
+  //   wrangler secret put GOOGLE_CLIENT_SECRET
+  //   wrangler secret put SESSION_SECRET
+  // 漏打時 /api/auth/* 會回 503 並在 log 指名缺哪個。
+  "vars": {
+    "ADMIN_EMAILS": "agito723@gmail.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "beyblade-battle-field",
+      // 本地開發用不到真 id（存 .wrangler/state 的本地 SQLite）；
+      // 部署前：wrangler d1 create beyblade-battle-field → 把真 id 填進來
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
   // 之後階段陸續加入：
-  // Phase 2: GOOGLE_CLIENT_ID/SECRET（secret）、ADMIN_EMAILS（vars）、D1 binding
   // Phase 4: Battle Room Durable Object
   // Phase 5: Lobby Durable Object
 }

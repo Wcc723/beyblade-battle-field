@@ -11,6 +11,8 @@
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.worker.json",
     "cf-typegen": "wrangler types",
+    "db:migrate": "wrangler d1 migrations apply beyblade-battle-field --local",
+    "db:migrate:remote": "wrangler d1 migrations apply beyblade-battle-field --remote",
     "test": "vitest run",
     "test:watch": "vitest",
     "balance": "vitest run -c vitest.balance.config.ts"
