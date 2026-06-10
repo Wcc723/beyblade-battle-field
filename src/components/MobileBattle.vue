@@ -14,7 +14,7 @@ const {
   onPointerDown, onPointerMove, onPointerUp,
   colorOf, teamIds, spinPct, hpPct,
   currentTime, roundResultLabel, championLabel, isFinished, specialInfo,
-  togglePlay, nextRound, resetMatch,
+  togglePlay, nextRound, resetMatch, sfxEnabled,
 } = bt;
 
 // 瞄準階段只顯示「當前發射方」的精簡設定（節省手機垂直空間）
@@ -131,6 +131,7 @@ const phaseClass = computed(() =>
           <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
         </select>
       </label>
+      <button class="foot-reset" @click="sfxEnabled = !sfxEnabled">{{ sfxEnabled ? "🔊" : "🔇" }}</button>
       <button class="foot-reset" @click="resetMatch">↺ 重新對戰</button>
     </div>
   </div>

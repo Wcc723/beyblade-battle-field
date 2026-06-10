@@ -6,6 +6,17 @@ import { getActiveConfig, activePresetName, presets, activeId, setActive } from 
 import { rimScoreAt } from "../physics/arena";
 import { getStats } from "../store/statStore";
 import { special } from "../store/specialStore";
+import {
+  sfxEnabled,
+  resumeAudio,
+  playCollision,
+  playSpecial,
+  playKO,
+  playRingOut,
+  playSpinOut,
+  playLaunch,
+  playWin,
+} from "../audio/sfx";
 
 /**
  * 對戰邏輯 composable —— 從 BattleViz.vue 的 <script> 完整萃取而來（發射手感、伺服器
@@ -269,6 +280,8 @@ export function useBattle(opts: UseBattleOptions = {}) {
 
   /* ---------- 流程：分開發射 → 伺服器統一運算 ---------- */
   function submitLaunch(init: BeybladeInit) {
+    resumeAudio(); // 發射是使用者手勢 → 解除 autoplay 限制
+    playLaunch();
     if (phase.value === "aim-A") {
       launchA.value = init;
       phase.value = "aim-B";
@@ -328,6 +341,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
   /* ---------- 回放迴圈（含撞擊慢動作） ---------- */
   let raf = 0;
   let lastT = 0;
+  let lastCollSfxAt = 0; // 撞擊音效節流（避免密集撞擊變機關槍）
   const slowmo = ref(false);
   const SLOWMO_WINDOW = 0.9; // 終結後 0.9 秒內放慢
   const SLOWMO_FACTOR = 0.3; // 放慢到 0.3 倍
@@ -371,6 +385,23 @@ export function useBattle(opts: UseBattleOptions = {}) {
       slowmo.value = mul < 1;
       playhead.value += (dtMs / 1000) * 60 * speed.value * mul;
       const curT1 = playhead.value / 60;
+      // 音效：播放窗格 (curT0, curT1] 內跨過的事件（撞擊取最強一筆+節流、必殺/死亡逐筆）
+      if (sfxEnabled.value) {
+        const r = result.value!;
+        let maxImp = 0;
+        for (const ce of r.collisionEvents) if (ce.t > curT0 && ce.t <= curT1 && ce.impact > maxImp) maxImp = ce.impact;
+        if (maxImp > 30 && now - lastCollSfxAt > 55) {
+          playCollision(maxImp);
+          lastCollSfxAt = now;
+        }
+        for (const se of r.specialEvents) if (se.t > curT0 && se.t <= curT1) playSpecial(se.kind);
+        for (const de of r.deathEvents)
+          if (de.t > curT0 && de.t <= curT1) {
+            if (de.reason === "ko") playKO();
+            else if (de.reason === "ring-out") playRingOut();
+            else playSpinOut();
+          }
+      }
       // 跨過必殺技事件 → snap 到該時刻並停格
       const ev = result.value!.specialEvents.find((e) => e.t > curT0 && e.t <= curT1 && e.t !== lastFreezeT);
       if (ev) {
@@ -384,6 +415,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
         playing.value = false;
         slowmo.value = false;
         awardRound(); // 回放結束才結算分數
+        if (sfxEnabled.value && result.value?.winnerId) playWin();
         draw();
         return;
       }
@@ -545,52 +577,92 @@ export function useBattle(opts: UseBattleOptions = {}) {
   function drawSparks(g: CanvasRenderingContext2D, curT: number) {
     const evs = result.value?.collisionEvents;
     if (!evs) return;
-    const DUR = 0.34;
+    const DUR = 0.42; // 多留一點餘韻
     for (let k = 0; k < evs.length; k++) {
       const ce = evs[k];
       const age = curT - ce.t;
       if (age < 0 || age >= DUR) continue;
       const a = age / DUR;
-      const s = Math.min(1, ce.impact / 260); // 撞擊強度 0~1
+      const s = Math.min(1, ce.impact / 230); // 門檻再降 → 同力道更猛
       const [ex, ey] = toCanvas(ce.x, ce.y);
       g.save();
       g.lineCap = "round";
-      // 衝擊波環（夠猛才有，白色擴張環）
-      if (s > 0.3) {
-        g.globalAlpha = (1 - a) * 0.55 * s;
-        g.strokeStyle = "#fff";
-        g.lineWidth = scaleLen(3.5) * (1 - a);
+
+      // 起爆白光（前 ~28%）：放射漸層一閃，給「啪」的瞬間衝擊
+      if (a < 0.28) {
+        const fa = 1 - a / 0.28;
+        const fr = scaleLen(14 + s * 44);
+        const grad = g.createRadialGradient(ex, ey, 0, ex, ey, fr);
+        grad.addColorStop(0, `rgba(255,255,255,${0.6 * fa * (0.5 + s)})`);
+        grad.addColorStop(0.4, `rgba(255,225,150,${0.32 * fa * (0.5 + s)})`);
+        grad.addColorStop(1, "rgba(255,170,70,0)");
+        g.globalAlpha = 1;
+        g.fillStyle = grad;
         g.beginPath();
-        g.arc(ex, ey, scaleLen(6) + scaleLen(10 + s * 60) * a, 0, Math.PI * 2);
+        g.arc(ex, ey, fr, 0, Math.PI * 2);
+        g.fill();
+      }
+
+      // 雙衝擊波環（夠猛才有第二圈）
+      g.globalAlpha = (1 - a) * 0.6 * (0.4 + s);
+      g.strokeStyle = "#fff";
+      g.lineWidth = scaleLen(4) * (1 - a);
+      g.beginPath();
+      g.arc(ex, ey, scaleLen(6) + scaleLen(12 + s * 74) * a, 0, Math.PI * 2);
+      g.stroke();
+      if (s > 0.45) {
+        g.globalAlpha = (1 - a) * 0.4 * s;
+        g.lineWidth = scaleLen(2.5) * (1 - a);
+        g.beginPath();
+        g.arc(ex, ey, scaleLen(6) + scaleLen(22 + s * 44) * a, 0, Math.PI * 2);
         g.stroke();
       }
-      // 中心爆閃（白 + 暖色光暈）
+
+      // 中心爆閃（更亮更大 + 光暈）
       g.shadowColor = "#ffd24d";
-      g.shadowBlur = 18 * s;
-      g.globalAlpha = (1 - a) * (0.55 + 0.45 * s);
+      g.shadowBlur = 24 * s;
+      g.globalAlpha = (1 - a) * (0.6 + 0.4 * s);
       g.fillStyle = "#fff";
       g.beginPath();
-      g.arc(ex, ey, scaleLen(4 + s * 11) * (1 - a * 0.55), 0, Math.PI * 2);
+      g.arc(ex, ey, scaleLen(5 + s * 14) * (1 - a * 0.5), 0, Math.PI * 2);
       g.fill();
       g.shadowBlur = 0;
-      // 放射火花（更多 8~24 條、更長、白→橙→紅）
-      const n = 8 + Math.floor(s * 16);
-      const reach = scaleLen(18 + s * 58);
+
+      // 放射火花（更多 10~34 條、更長、白→橙→紅）
+      const n = 10 + Math.floor(s * 24);
+      const reach = scaleLen(22 + s * 72);
       for (let i = 0; i < n; i++) {
         const ang = hash01(k * 41.7 + i * 2.3) * Math.PI * 2;
         const spd = 0.5 + hash01(k * 13.1 + i * 5.7) * 0.5;
         const d0 = reach * a * spd;
-        const len = scaleLen(6 + s * 14) * (1 - a) * (0.6 + spd * 0.4);
+        const len = scaleLen(7 + s * 18) * (1 - a) * (0.6 + spd * 0.4);
         const c = Math.cos(ang);
         const sn = Math.sin(ang);
-        g.globalAlpha = (1 - a) * (0.78 + 0.22 * s);
+        g.globalAlpha = (1 - a) * (0.8 + 0.2 * s);
         const r = hash01(k * 7.3 + i);
         g.strokeStyle = r < 0.4 ? "#ffffff" : r < 0.75 ? "#ffcf5a" : "#ff8a3c";
-        g.lineWidth = (1.8 + s * 1.8) * (1 - a * 0.4);
+        g.lineWidth = (2 + s * 2.2) * (1 - a * 0.4);
         g.beginPath();
         g.moveTo(ex + c * d0, ey + sn * d0);
         g.lineTo(ex + c * (d0 + len), ey + sn * (d0 + len));
         g.stroke();
+      }
+
+      // 碎屑火星（大撞擊才有，飛濺 + 重力下墜的小點）
+      if (s > 0.4) {
+        const m = Math.floor(s * 10);
+        g.fillStyle = "#ffd24d";
+        for (let i = 0; i < m; i++) {
+          const ang = hash01(k * 53.1 + i * 7.7) * Math.PI * 2;
+          const sp = 0.5 + hash01(k * 29.3 + i) * 0.5;
+          const dd = scaleLen(20 + s * 80) * a * sp;
+          const px = ex + Math.cos(ang) * dd;
+          const py = ey + Math.sin(ang) * dd + scaleLen(40) * a * a; // 下墜
+          g.globalAlpha = (1 - a) * 0.85;
+          g.beginPath();
+          g.arc(px, py, Math.max(0.5, scaleLen(2.2) * (1 - a)), 0, Math.PI * 2);
+          g.fill();
+        }
       }
       g.restore();
     }
@@ -1010,5 +1082,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     specialInfo,
     SPECIAL_NAMES,
     specialColor,
+    // 音效開關（UI 🔊/🔇）
+    sfxEnabled,
   };
 }
