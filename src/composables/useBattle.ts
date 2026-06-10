@@ -742,6 +742,175 @@ export function useBattle(opts: UseBattleOptions = {}) {
     }
   }
 
+  /* ---------- 必殺技動畫特效（純由 curT 推導 → 重播/變速/scrub 穩、確定性） ---------- */
+  function specialDuration(kind: SpecialKind): number {
+    if (kind === "vortex") return special.vortexDuration;
+    if (kind === "dash") return special.dashDuration;
+    if (kind === "clone") return special.cloneDuration;
+    return 0.45;
+  }
+  /** 由最近幾幀位移推導移動方向（canvas 空間，已 y 翻轉）。 */
+  function headingOf(id: string, frames: Frame[], idx: number): { x: number; y: number } | null {
+    const a = frames[Math.max(0, idx - 3)].bodies.find((x) => x.id === id);
+    const b = frames[idx].bodies.find((x) => x.id === id);
+    if (!a || !b) return null;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 1e-3) return null;
+    return { x: dx / d, y: -dy / d };
+  }
+  /** 漩渦：陀螺底下旋轉向內收的螺旋 + 中心吸入暗點 + 被吸入的粒子（俯視壓扁）。 */
+  function drawVortexFx(g: CanvasRenderingContext2D, cx: number, cy: number, curT: number, age: number, dur: number) {
+    const fade = Math.min(1, age / 0.2) * Math.min(1, (dur - age) / 0.3);
+    if (fade <= 0) return;
+    const R = scaleLen(special.vortexRange) * 0.5;
+    const spin = curT * 5.5;
+    g.save();
+    g.translate(cx, cy);
+    const grad = g.createRadialGradient(0, 0, 0, 0, 0, R);
+    grad.addColorStop(0, "rgba(70,25,110,0.6)");
+    grad.addColorStop(1, "rgba(140,90,180,0)");
+    g.globalAlpha = 0.65 * fade;
+    g.fillStyle = grad;
+    g.beginPath();
+    g.ellipse(0, 0, R, R * 0.5, 0, 0, Math.PI * 2);
+    g.fill();
+    g.globalAlpha = 0.5 * fade;
+    g.strokeStyle = "#c07bff";
+    g.lineWidth = scaleLen(2.4);
+    g.lineCap = "round";
+    const ARMS = 4;
+    for (let arm = 0; arm < ARMS; arm++) {
+      g.beginPath();
+      const base = spin + (arm / ARMS) * Math.PI * 2;
+      for (let s = 0; s <= 1.0001; s += 0.05) {
+        const r = R * (1 - s * 0.85);
+        const ang = base + s * 3.4; // 向內收的螺旋
+        const x = Math.cos(ang) * r;
+        const y = Math.sin(ang) * r * 0.5;
+        s === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    g.fillStyle = "#e2c4ff";
+    for (let i = 0; i < 12; i++) {
+      const pf = (curT * 1.4 + i / 12) % 1; // 由外往內循環
+      const r = R * (1 - pf);
+      const ang = spin * 1.6 + i * 2.1 + pf * 4;
+      g.globalAlpha = 0.8 * fade * (1 - pf);
+      g.beginPath();
+      g.arc(Math.cos(ang) * r, Math.sin(ang) * r * 0.5, Math.max(0.5, scaleLen(2.6) * (1 - pf)), 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+  /** 高速移動：後方數個半透明殘影（取過去幾幀位置）。 */
+  function drawDashFx(g: CanvasRenderingContext2D, id: string, frames: Frame[], idx: number) {
+    for (let j = 1; j <= 4; j++) {
+      const fi = idx - j * 3;
+      if (fi < 0) break;
+      const tb = frames[fi].bodies.find((x) => x.id === id);
+      if (!tb) continue;
+      drawTop(g, tb.x, tb.y, tb.z ?? 0, tb.angle, "#5fd0ff", 26, true, presetOf(id), 0.3 * (1 - j / 5));
+    }
+  }
+  /** 衝刺突進：沿移動方向後方甩出速度線。 */
+  function drawRushFx(g: CanvasRenderingContext2D, bx: number, by: number, hd: { x: number; y: number } | null, age: number, col: string) {
+    if (!hd) return;
+    const a = age / 0.35;
+    const dx = hd.x;
+    const dy = hd.y;
+    const nx = -dy;
+    const ny = dx;
+    g.save();
+    g.lineCap = "round";
+    for (let i = 0; i < 7; i++) {
+      const off = (i - 3) * scaleLen(7);
+      const jit = hash01(i * 3.1 + 0.5);
+      const len = scaleLen(28 + 50 * (1 - a)) * (0.55 + jit * 0.7);
+      const sx = bx + nx * off - dx * scaleLen(8);
+      const sy = by + ny * off - dy * scaleLen(8);
+      g.globalAlpha = (1 - a) * 0.85 * (0.5 + jit * 0.5);
+      g.strokeStyle = i % 2 ? "#ffffff" : col;
+      g.lineWidth = (2.4 + jit * 1.6) * (1 - a * 0.4);
+      g.beginPath();
+      g.moveTo(sx, sy);
+      g.lineTo(sx - dx * len, sy - dy * len);
+      g.stroke();
+    }
+    g.restore();
+  }
+  /** 衝擊：黃白雙爆發環。 */
+  function drawBlastFx(g: CanvasRenderingContext2D, ex: number, ey: number, p: number) {
+    g.save();
+    g.globalAlpha = (1 - p) * 0.85;
+    g.strokeStyle = "#ffce4d";
+    g.lineWidth = scaleLen(6) * (1 - p);
+    g.beginPath();
+    g.arc(ex, ey, scaleLen(14) + scaleLen(92) * p, 0, Math.PI * 2);
+    g.stroke();
+    g.globalAlpha = (1 - p) * 0.6;
+    g.strokeStyle = "#fff";
+    g.lineWidth = scaleLen(3) * (1 - p);
+    g.beginPath();
+    g.arc(ex, ey, scaleLen(8) + scaleLen(54) * p, 0, Math.PI * 2);
+    g.stroke();
+    g.restore();
+  }
+  /** 分身：召喚漣漪。 */
+  function drawCloneSpawnFx(g: CanvasRenderingContext2D, bx: number, by: number, p: number) {
+    g.save();
+    g.strokeStyle = "#ffffff";
+    for (let r = 0; r < 2; r++) {
+      g.globalAlpha = (1 - p) * 0.6;
+      g.lineWidth = scaleLen(2.5) * (1 - p);
+      g.beginPath();
+      g.arc(bx, by, scaleLen(8) + scaleLen(34) * p + r * scaleLen(12), 0, Math.PI * 2);
+      g.stroke();
+    }
+    g.restore();
+  }
+  /** 必殺技「地面/殘影」層（陀螺底下）：漩渦吸入 / 高速殘影 / 衝刺速度線。 */
+  function drawSpecialGround(g: CanvasRenderingContext2D, curT: number, frame: Frame, frames: Frame[], idx: number) {
+    const evs = result.value?.specialEvents;
+    if (!evs) return;
+    for (const ev of evs) {
+      const age = curT - ev.t;
+      if (age < 0) continue;
+      const fb = frame.bodies.find((x) => x.id === ev.id);
+      if (!fb) continue;
+      if (ev.kind === "vortex" && age <= specialDuration("vortex")) {
+        const [bx, by] = toCanvas(fb.x, fb.y);
+        drawVortexFx(g, bx, by, curT, age, specialDuration("vortex"));
+      } else if (ev.kind === "dash" && age <= specialDuration("dash")) {
+        drawDashFx(g, ev.id, frames, idx);
+      } else if (ev.kind === "rush" && age < 0.35) {
+        const [bx, by] = toCanvas(fb.x, fb.y);
+        drawRushFx(g, bx, by, headingOf(ev.id, frames, idx), age, colorOf(ev.id));
+      }
+    }
+  }
+  /** 必殺技「上層」層（陀螺之上）：衝擊爆發環 / 分身召喚漣漪。 */
+  function drawSpecialTop(g: CanvasRenderingContext2D, curT: number, frame: Frame) {
+    const evs = result.value?.specialEvents;
+    if (!evs) return;
+    for (const ev of evs) {
+      const age = curT - ev.t;
+      if (age < 0) continue;
+      if (ev.kind === "blast" && age < 0.4) {
+        const [ex, ey] = toCanvas(ev.x, ev.y);
+        drawBlastFx(g, ex, ey, age / 0.4);
+      } else if (ev.kind === "clone" && age < 0.5) {
+        const fb = frame.bodies.find((x) => x.id === ev.id);
+        if (fb) {
+          const [bx, by] = toCanvas(fb.x, fb.y);
+          drawCloneSpawnFx(g, bx, by, age / 0.5);
+        }
+      }
+    }
+  }
+
   function draw() {
     if (!ctx) return;
     const g = ctx;
@@ -755,23 +924,40 @@ export function useBattle(opts: UseBattleOptions = {}) {
       const i1 = Math.min(frames.length - 1, i0 + 1);
       const idx = i0;
       const frame = lerpFrame(frames[i0], frames[i1], ph - i0);
-      // 軌跡尾巴
+      const curT = ph / 60; // dt=1/60、sampleEvery=1 → 幀索引即 t*60
+      // 軌跡尾巴：從尾(細透明)漸變到頭(粗實) → 更明顯、可辨隊伍
+      const TAIL = 46;
       for (const b of frame.bodies) {
         if (b.isClone) continue; // 分身不畫尾巴
         const col = colorOf(b.id);
-        g.beginPath();
-        let started = false;
-        for (let f = Math.max(0, idx - 40); f <= idx; f++) {
+        const start = Math.max(0, idx - TAIL);
+        g.save();
+        g.lineCap = "round";
+        g.lineJoin = "round";
+        g.strokeStyle = col;
+        let prev: [number, number] | null = null;
+        for (let f = start; f <= idx; f++) {
           const tb = frames[f].bodies.find((x) => x.id === b.id);
-          if (!tb) continue;
-          const [px, py] = toCanvas(tb.x, tb.y);
-          started ? g.lineTo(px, py) : g.moveTo(px, py);
-          started = true;
+          if (!tb) {
+            prev = null;
+            continue;
+          }
+          const p = toCanvas(tb.x, tb.y);
+          if (prev) {
+            const u = (f - start) / Math.max(1, idx - start); // 0=尾 1=頭
+            g.globalAlpha = 0.05 + 0.6 * u * u;
+            g.lineWidth = scaleLen(1.2 + 7.5 * u); // 細 → 粗
+            g.beginPath();
+            g.moveTo(prev[0], prev[1]);
+            g.lineTo(p[0], p[1]);
+            g.stroke();
+          }
+          prev = p;
         }
-        g.strokeStyle = col + "55";
-        g.lineWidth = 2;
-        g.stroke();
+        g.restore();
       }
+      // 必殺技「地面/殘影」特效（在陀螺底下）：漩渦吸入 / 高速殘影 / 衝刺速度線
+      drawSpecialGround(g, curT, frame, frames, idx);
       // 擊破(ko)的陀螺 → 不畫半透明陀螺，改由 drawDeaths 畫破碎碎片
       const koIds = new Set(result.value.deathEvents.filter((d) => d.reason === "ko").map((d) => d.id));
       // 陀螺 + 撞牆閃光
@@ -802,28 +988,11 @@ export function useBattle(opts: UseBattleOptions = {}) {
       }
 
       // 碰撞火花 + 擊破爆裂
-      const curT = ph / 60;
       drawSparks(g, curT);
       drawDeaths(g, curT);
 
-      // 必殺技發動特效：擴張光環（持續 0.55s）
-      for (const ev of result.value.specialEvents) {
-        const dtv = curT - ev.t;
-        if (dtv < 0 || dtv > 0.55) continue;
-        const fb = frame.bodies.find((x) => x.id === ev.id);
-        if (!fb) continue;
-        const [ex, ey] = toCanvas(fb.x, fb.y);
-        const prog = dtv / 0.55;
-        const ecol = specialColor(ev);
-        g.save();
-        g.globalAlpha = (1 - prog) * 0.9;
-        g.strokeStyle = ecol;
-        g.lineWidth = 4;
-        g.beginPath();
-        g.arc(ex, ey, scaleLen(26) + prog * 70, 0, Math.PI * 2);
-        g.stroke();
-        g.restore();
-      }
+      // 必殺技「上層」特效：衝擊爆發環 / 分身召喚漣漪
+      drawSpecialTop(g, curT, frame);
 
       // 必殺技停格 banner：大字招式名（停格期間顯示，讓人看清是什麼招）
       if (freezeEvent.value) {
