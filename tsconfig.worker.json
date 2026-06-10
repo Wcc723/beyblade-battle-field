@@ -1,0 +1,10 @@
+{
+  // Worker 端型別檢查（npm run typecheck 會跑）：worker/ 不可碰 DOM，
+  // 連同 src/physics 一起檢查，確保引擎維持零瀏覽器相依（可跑在 Durable Object）。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "types": []
+  },
+  "include": ["worker", "worker-configuration.d.ts", "src/physics"]
+}

@@ -2,6 +2,10 @@
 node_modules/
 dist/
 
+# Cloudflare（本地開發狀態與秘密）
+.wrangler/
+.dev.vars*
+
 # 美術中間檔（codex 原始 PNG / 去背 PNG，可重新處理；最終 WebP 在 public/beyblades/）
 art/
 

@@ -1,34 +1,23 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import BattleViz from "./components/BattleViz.vue";
-import MobileBattle from "./components/MobileBattle.vue";
-import ArenaAdmin from "./components/ArenaAdmin.vue";
-import BeybladeAdmin from "./components/BeybladeAdmin.vue";
-
-const view = ref<"battle" | "mobile" | "arena" | "beyblade">("battle");
+import { RouterLink, RouterView } from "vue-router";
 </script>
 
 <template>
   <div class="page">
     <header class="page-header">
       <div class="title-row">
-        <h1>⚔️ 戰鬥陀螺 — 物理引擎原型</h1>
+        <h1>⚔️ 戰鬥陀螺</h1>
         <nav class="tabs">
-          <button :class="{ active: view === 'battle' }" @click="view = 'battle'">對戰場</button>
-          <button :class="{ active: view === 'mobile' }" @click="view = 'mobile'">📱 手機版</button>
-          <button :class="{ active: view === 'arena' }" @click="view = 'arena'">⚙️ 場地後台</button>
-          <button :class="{ active: view === 'beyblade' }" @click="view = 'beyblade'">🌀 陀螺後台</button>
+          <RouterLink to="/">🏟️ 大廳</RouterLink>
+          <RouterLink to="/settings">👤 個人設定</RouterLink>
+          <RouterLink to="/admin/arena">⚙️ 場地後台</RouterLink>
+          <RouterLink to="/admin/beyblade">🌀 陀螺後台</RouterLink>
+          <RouterLink to="/test/battle">🧪 測試對戰</RouterLink>
+          <RouterLink to="/test/mobile">📱 測試手機版</RouterLink>
         </nav>
       </div>
-      <p class="subtitle">
-        拖曳發射（手機優先）：紅藍分開瞄準發射 → 伺服器（此處本機）統一運算 → 回放軌跡。
-        場地參數可在「場地後台」存多組切換；陀螺攻防續重可在「陀螺後台」調整。
-      </p>
     </header>
-    <BattleViz v-if="view === 'battle'" />
-    <MobileBattle v-else-if="view === 'mobile'" />
-    <ArenaAdmin v-else-if="view === 'arena'" @go-battle="view = 'battle'" />
-    <BeybladeAdmin v-else @go-battle="view = 'battle'" />
+    <RouterView />
   </div>
 </template>
 
@@ -66,6 +55,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+  margin-bottom: 18px;
 }
 .page-header h1 {
   margin: 0;
@@ -74,8 +64,9 @@ body {
 .tabs {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
-.tabs button {
+.tabs a {
   background: var(--panel);
   color: var(--muted);
   border: 1px solid var(--line);
@@ -84,16 +75,11 @@ body {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
 }
-.tabs button.active {
+.tabs a.router-link-active {
   background: var(--accent);
   color: #1a1207;
   border-color: var(--accent);
-}
-.subtitle {
-  margin: 10px 0 18px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
 }
 </style>

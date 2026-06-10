@@ -8,18 +8,24 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.worker.json",
+    "cf-typegen": "wrangler types",
     "test": "vitest run",
     "test:watch": "vitest",
     "balance": "vitest run -c vitest.balance.config.ts"
   },
   "dependencies": {
-    "vue": "^3.5.13"
+    "vue": "^3.5.13",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.40.1",
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vitest": "^3.0.5",
-    "vue-tsc": "^2.2.0"
+    "vue-tsc": "^2.2.0",
+    "wrangler": "^4.99.0"
   }
 }

@@ -2,22 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-網頁版雙人對戰戰鬥陀螺。Vite + Vue 3 + TypeScript。目前是**單機物理引擎原型**，但全程刻意依「之後搬上 Cloudflare（Durable Object）」的方向設計。請用**繁體中文**溝通。
+網頁版雙人對戰戰鬥陀螺。Vite + Vue 3 + TypeScript + Cloudflare Workers。單機物理引擎原型已完成（保留在 `/test/*` 當測試頁），正在進行**雙人線上對戰化**（Cloudflare Worker + Durable Object + D1 + Google OAuth，規劃見下方「線上化路線」）。請用**繁體中文**溝通。
 
 ## Commands
 
 ```bash
-npm run dev        # Vite dev server → http://localhost:5173
+npm run dev        # Vite dev server（含 Worker，@cloudflare/vite-plugin）→ http://localhost:5173
 npm test           # vitest（引擎單元測試）
 npm run test:watch # vitest watch
 npm run balance    # 平衡分析：四類型互打數千場，輸出勝率/勝負原因/猜拳矩陣
 npm run build      # Vite build（注意：build 不做型別檢查）
-npx vue-tsc --noEmit   # 型別檢查（改完務必跑這個，build 不會幫你檢查）
+npm run typecheck  # 型別檢查：vue-tsc（前端）+ tsc -p tsconfig.worker.json（worker，改完務必跑）
+npm run deploy     # build + wrangler deploy
+npm run cf-typegen # wrangler types → 重新產生 worker-configuration.d.ts（改 wrangler.jsonc 後要跑）
 ```
 
 跑單一測試：`npx vitest run -t "確定性"`（用 `-t` 比對 describe/it 名稱，名稱是中文）。
 
-改完物理引擎或屬性/場地數值後，慣例是：`npx vue-tsc --noEmit` → `npm test` → 動到平衡時再 `npm run balance`。
+改完物理引擎或屬性/場地數值後，慣例是：`npm run typecheck` → `npm test` → 動到平衡時再 `npm run balance`。
 
 ## 核心架構：確定性批次模擬
 
@@ -51,7 +53,15 @@ npx vue-tsc --noEmit   # 型別檢查（改完務必跑這個，build 不會幫�
 - `statStore.ts` — 四類型屬性覆寫 → **陀螺後台**
 - `specialStore.ts` — 必殺技數值（`SpecialConfig`）→ **陀螺後台**
 
-`App.vue` 三個分頁切換對應這三塊。`simulate` 吃 `config.arena` 與 `config.special` 覆寫。
+`simulate` 吃 `config.arena` 與 `config.special` 覆寫。
+
+## 線上化路線（進行中）
+
+頁面用 vue-router（`src/router.ts`）：`/` 大廳、`/room/:code` 對戰廳、`/settings` 個人設定、`/admin/*` 後台、`/test/battle`+`/test/mobile`＝**原單機頁面原樣保留**（繼續吃 localStorage、不受線上化影響）。
+
+Cloudflare 端：`worker/index.ts`（入口，`/api/*` 走 `run_worker_first`）+ `wrangler.jsonc`（SPA fallback）。規格細節（已拍板）：大廳＝房號+快速配對+公開房列表；全站 Google OAuth（`ADMIN_EMAILS` env var 管後台權限）；場地用管理員啟用的全域組、玩家各自選陀螺；線上設定存 D1、房間暫態在 Battle Room DO；seed 由 DO 在雙方提交後產生（防離線暴搜）；R2 第一階段不用。
+
+分階段：✅P1 骨架（router+worker+vite-plugin）→ P2 OAuth+權限 → P3 個人設定+後台搬 D1 → P4 Battle Room DO+對戰廳（以 `MobileBattle.vue` 為基底）→ P5 大廳 DO+戰績。
 
 ## 必殺技
 
@@ -68,7 +78,9 @@ npx vue-tsc --noEmit   # 型別檢查（改完務必跑這個，build 不會幫�
 
 ## 容易踩的雷
 
-- **`build` 不做型別檢查**：要 `npx vue-tsc --noEmit`。
+- **`build` 不做型別檢查**：要 `npm run typecheck`（涵蓋前端 vue-tsc 與 worker tsc 兩套）。
+- **vitest 設定刻意與 vite.config.ts 分離**：`vite.config.ts` 掛了 `@cloudflare/vite-plugin`（dev/build 用）；測試走 `vitest.config.ts`（不含該 plugin，避免測試啟動 worker runtime）。改 vite 設定時兩邊都要想到。
+- **`tsconfig.worker.json` 連同 `src/physics` 一起檢查**（lib 只有 ESNext、無 DOM）→ 引擎一旦混入瀏覽器相依，typecheck 就會擋下來。
 - **`arena.collisionSpinLoss` 名實不符**：它現在是「碰撞扣**血量**」的係數（語意改過、為相容舊存檔沒改名）。
 - **`ArenaConfig` 新欄位設成可選**（如 `hpBase`、`spinKnockback`）：舊 localStorage 場地沒這些欄位，引擎用 `?? 預設` 處理；新增欄位時設可選，否則測試的 `neutralArena()` 也要補。
 - **不要靠「升 localStorage 版本鍵」來套用新預設**（會讓使用者既有資料讀不到）；改用「可選欄位 + 合併預設」。
