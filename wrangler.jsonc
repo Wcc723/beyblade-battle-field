@@ -4,7 +4,10 @@
   "main": "./worker/index.ts",
   "compatibility_date": "2026-06-01",
   // SPA：非資產路徑回 index.html（vue-router history mode）；/api/* 一律先進 Worker
+  // directory：dev/build 時 @cloudflare/vite-plugin 會自己管（忽略此值）；
+  // 寫上是為了讓「不經 vite 的 wrangler 指令」（如 CI 裡 build 前跑 d1 migrations）也能解析此設定檔
   "assets": {
+    "directory": "./dist/client",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
