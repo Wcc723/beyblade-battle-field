@@ -259,7 +259,7 @@ describe("必殺技 (specials)", () => {
           body({ id: "A", position: { x: -15, y: 0 }, velocity: { x: 300, y: 0 }, spin: 1e6, radius: 20, special: "blast" }),
           body({ id: "B", position: { x: 15, y: 0 }, velocity: { x: -300, y: 0 }, spin: 1e6, radius: 20 }),
         ],
-        { dt: 1 / 60, maxTime: 1, arena: neutralArena({ restitution: 0.5, radius: 1e6 }), seed },
+        { dt: 1 / 60, maxTime: 1, arena: neutralArena({ restitution: 0.5, radius: 1e6 }), seed, special: { graceTime: 0 } },
       );
     let fired = 0;
     const N = 60;
@@ -289,7 +289,7 @@ describe("必殺技 (specials)", () => {
           body({ id: "A", position: { x: -300, y: 0 }, velocity: { x: 200, y: 0 }, spin: 1e6, radius: 20, special: "rush" }),
           body({ id: "B", position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 }, spin: 1e6, radius: 20 }),
         ],
-        { dt: 1 / 60, maxTime: 3, arena: neutralArena({ radius: 5000 }), seed: s },
+        { dt: 1 / 60, maxTime: 3, arena: neutralArena({ radius: 5000 }), seed: s, special: { graceTime: 0 } },
       );
       if (r.specialEvents.some((e) => e.kind === "rush" && e.id === "A")) fired++;
     }
@@ -653,7 +653,7 @@ describe("必殺技：冷卻 + 每回合限次", () => {
         maxTime: 6,
         arena: tight,
         seed: 4,
-        special: { blastChance: 1, blastMaxUses: maxUses, blastImpactMin: 20, blastPush: 0, blastDamage: 0, blastCooldown: 0.05 },
+        special: { graceTime: 0, blastChance: 1, blastMaxUses: maxUses, blastImpactMin: 20, blastPush: 0, blastDamage: 0, blastCooldown: 0.05 },
       },
     ).specialEvents.filter((e) => e.kind === "blast" && e.id === "A").length;
 
@@ -683,7 +683,7 @@ describe("必殺技新招：dash / vortex / clone", () => {
         maxTime: 1,
         arena: open,
         seed: 1,
-        special: { dashChance: 1, dashTriggerSpin: 0.5, dashMaxUses: 1, dashSpinRestore: 1500, dashDuration: 1, dashAccel: 0 },
+        special: { graceTime: 0, dashChance: 1, dashTriggerSpin: 0.5, dashMaxUses: 1, dashSpinRestore: 1500, dashDuration: 1, dashAccel: 0 },
       },
     );
     expect(r.specialEvents.filter((e) => e.kind === "dash" && e.id === "A").length).toBe(1);
@@ -702,7 +702,7 @@ describe("必殺技新招：dash / vortex / clone", () => {
         maxTime: 0.6,
         arena: open,
         seed: 1,
-        special: { vortexChance: 1, vortexRange: 250, vortexMaxUses: 1, vortexPull: 400, vortexDuration: 1 },
+        special: { graceTime: 0, vortexChance: 1, vortexRange: 250, vortexMaxUses: 1, vortexPull: 400, vortexDuration: 1 },
       },
     );
     expect(r.specialEvents.filter((e) => e.kind === "vortex" && e.id === "A").length).toBe(1);
@@ -722,7 +722,7 @@ describe("必殺技新招：dash / vortex / clone", () => {
         maxTime: 3,
         arena: open,
         seed: 1,
-        special: { cloneChance: 1, cloneRange: 200, cloneMaxUses: 1, cloneDuration: 1, cloneSpin: 2000, cloneAttackMul: 0.4, cloneHoming: 0 },
+        special: { graceTime: 0, cloneChance: 1, cloneRange: 200, cloneMaxUses: 1, cloneDuration: 1, cloneSpin: 2000, cloneAttackMul: 0.4, cloneHoming: 0 },
       },
     );
     expect(r.specialEvents.filter((e) => e.kind === "clone" && e.id === "A").length).toBe(1);

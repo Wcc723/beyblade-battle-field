@@ -5,6 +5,8 @@ import ArenaSvg from "../components/ArenaSvg.vue";
 import BbIcon from "../components/ui/BbIcon.vue";
 import { useBattle } from "../composables/useBattle";
 import { useOnlineBattle } from "../composables/useOnlineBattle";
+import { beybladeName } from "../game/names";
+import { BOT_UID } from "../game/room";
 import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../physics/types";
 
 const route = useRoute();
@@ -21,7 +23,7 @@ const {
   result, playhead, playing, speed, slowmo,
   canvas, SIZE, dragging, powerPct,
   onPointerDown, onPointerMove, onPointerUp,
-  spinPct, hpPct, currentTime, specialInfo,
+  spinPct, hpPct, specialInfo,
   SPECIAL_NAMES, specialColor,
   togglePlay, sfxEnabled,
 } = bt;
@@ -59,6 +61,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearTimeout(configRetry);
   clearTimeout(spBannerTimer);
+  clearTimeout(tapArmTimer);
   online.dispose();
 });
 
@@ -71,6 +74,49 @@ const waitingOpponent = computed(() => !snap.value || snap.value.phase === "wait
 // phase !== 'playing'：對手提早按下一回合時（snapshot 已 aiming、本地回放未完）不能讓瞄準面板蓋掉回放控制
 const showAimPanel = computed(() => isAiming.value && !online.myLaunched.value && phase.value !== "playing");
 const replayDone = computed(() => bt.isFinished());
+
+/* ---------- 陀螺名（uid+type 穩定 hash）：自己側吃本地 setup → 改類型即時跟著變 ---------- */
+function sideType(side: "A" | "B"): string {
+  if (side === mySide.value) return (side === "B" ? setupB : setupA).preset;
+  return snap.value?.players[side]?.loadout.type ?? "balance";
+}
+function sideBlade(side: "A" | "B"): string {
+  const p = snap.value?.players[side];
+  if (!p) return "";
+  return beybladeName(p.isBot ? BOT_UID : p.uid, sideType(side));
+}
+const typeA = computed(() => sideType("A"));
+const typeB = computed(() => sideType("B"));
+const bladeA = computed(() => sideBlade("A"));
+const bladeB = computed(() => sideBlade("B"));
+const myBlade = computed(() => (mySide.value ? sideBlade(mySide.value) : ""));
+
+/* ---------- 底部抽屜（配置收進 bottom sheet；純 UI 狀態，不碰瞄準/WS 邏輯） ---------- */
+const sheetOpen = ref(false);
+watch(showAimPanel, (v) => {
+  if (!v) sheetOpen.value = false; // 發射 / 換階段 → 抽屜自動收合
+});
+
+/* ---------- 點擊續戰：結算銘牌亮相 800ms 後，點場地任意處＝下一回合 ----------
+   matchOver 不觸發（仍走「再來一場」鍵）；對手先按下一回合時 snap 已是 aiming
+   → canTapNext 自然為 false，不干擾既有 pendingAiming（播完再切）流程。 */
+const canTapNext = computed(
+  () =>
+    snap.value?.phase === "review" &&
+    replayDone.value &&
+    !!online.lastOutcome.value &&
+    !online.lastOutcome.value.matchOver,
+);
+const tapArmed = ref(false); // 800ms 防誤觸：銘牌剛亮時的點擊一律忽略
+let tapArmTimer: ReturnType<typeof setTimeout> | undefined;
+watch(canTapNext, (v) => {
+  clearTimeout(tapArmTimer);
+  tapArmed.value = false;
+  if (v) tapArmTimer = setTimeout(() => (tapArmed.value = true), 800);
+});
+function onArenaTap() {
+  if (canTapNext.value && tapArmed.value) online.nextRound();
+}
 
 const phaseBanner = computed(() => {
   const s = snap.value;
@@ -179,11 +225,15 @@ function onSpecialChange() {
         <!-- 紅方 A（先手・右旋） -->
         <div class="fighter fa">
           <div class="nameplate">
-            <img v-if="snap?.players.A?.picture" :src="snap.players.A.picture" class="np-ava" alt="" referrerpolicy="no-referrer" />
-            <strong>{{ snap?.players.A?.nickname ?? "—" }}</strong>
-            <span class="f-badge f-badge--red">{{ PRESET_LABELS[snap?.players.A?.loadout.type ?? "balance"] }}</span>
-            <span class="chip">先手・右旋</span>
-            <span v-if="snap?.players.A && !snap.players.A.connected" class="f-badge f-badge--red">離線</span>
+            <div class="np-row">
+              <img v-if="snap?.players.A?.picture" :src="snap.players.A.picture" class="np-ava" alt="" referrerpolicy="no-referrer" />
+              <strong>{{ snap?.players.A?.nickname ?? "—" }}</strong>
+              <span v-if="snap?.players.A && !snap.players.A.connected" class="f-badge f-badge--red">離線</span>
+            </div>
+            <div v-if="snap?.players.A" class="np-sub">
+              <span class="np-blade">{{ bladeA }}・{{ PRESET_LABELS[typeA] ?? typeA }}</span>
+              <span class="chip">先手・右旋</span>
+            </div>
           </div>
           <div class="meter-set">
             <div class="mrow">
@@ -205,7 +255,12 @@ function onSpecialChange() {
         <!-- 中央銘牌：回合 / 瞄準倒數 / 比分 pips -->
         <div class="hud-mid">
           <div class="round-tag">R<b>{{ snap?.roundNum ?? 1 }}</b></div>
-          <div class="timer" :class="{ low: online.aimRemaining.value != null && online.aimRemaining.value <= 10 }">
+          <!-- 回放中：倒數位置改掛 REPLAY 小字（取代整條「對戰回放」phase banner） -->
+          <div v-if="phase === 'playing'" class="timer is-replay">
+            <b>REPLAY</b>
+            <em>PLAYBACK</em>
+          </div>
+          <div v-else class="timer" :class="{ low: online.aimRemaining.value != null && online.aimRemaining.value <= 10 }">
             <b>{{ online.aimRemaining.value ?? "--" }}</b>
             <em>SEC</em>
           </div>
@@ -218,11 +273,15 @@ function onSpecialChange() {
         <!-- 藍方 B（後手・左旋；鏡像） -->
         <div class="fighter fb">
           <div class="nameplate">
-            <img v-if="snap?.players.B?.picture" :src="snap.players.B.picture" class="np-ava" alt="" referrerpolicy="no-referrer" />
-            <strong>{{ snap?.players.B?.nickname ?? "—" }}</strong>
-            <span class="f-badge f-badge--blue">{{ PRESET_LABELS[snap?.players.B?.loadout.type ?? "balance"] }}</span>
-            <span class="chip">後手・左旋</span>
-            <span v-if="snap?.players.B && !snap.players.B.connected" class="f-badge f-badge--red">離線</span>
+            <div class="np-row">
+              <img v-if="snap?.players.B?.picture" :src="snap.players.B.picture" class="np-ava" alt="" referrerpolicy="no-referrer" />
+              <strong>{{ snap?.players.B?.nickname ?? "—" }}</strong>
+              <span v-if="snap?.players.B && !snap.players.B.connected" class="f-badge f-badge--red">離線</span>
+            </div>
+            <div v-if="snap?.players.B" class="np-sub">
+              <span class="np-blade">{{ bladeB }}・{{ PRESET_LABELS[typeB] ?? typeB }}</span>
+              <span class="chip">後手・左旋</span>
+            </div>
           </div>
           <div class="meter-set">
             <div class="mrow">
@@ -244,13 +303,13 @@ function onSpecialChange() {
       </div>
     </div>
 
-    <!-- 階段狀態帶 -->
-    <div class="phase-strip" :class="{ mine: showAimPanel, waitp: !showAimPanel && phase !== 'playing' }">{{ phaseBanner }}</div>
+    <!-- 階段狀態帶（回放中整條收掉：REPLAY 併進 HUD 中央銘牌、訊息改掛場地下緣） -->
+    <div v-if="phase !== 'playing'" class="phase-strip" :class="{ mine: showAimPanel, waitp: !showAimPanel }">{{ phaseBanner }}</div>
 
     <!-- 場地（1:1 滿寬金屬擂台） -->
     <div class="plate plate--flush arena-plate">
       <div class="hazard"></div>
-      <div class="m-arena">
+      <div class="m-arena" @click="onArenaTap">
         <ArenaSvg :arena="arena" />
         <canvas
           ref="canvas"
@@ -327,69 +386,27 @@ function onSpecialChange() {
             <h3 class="sm">{{ outcomeLabel }}</h3>
           </template>
         </div>
+
+        <!-- 場地下緣小字：對手先行提示（取代回放 phase banner）/ 點擊續戰呼吸提示 -->
+        <div v-if="phase === 'playing' && snap?.phase === 'aiming'" class="tap-hint">對手已進入下一回合，回放結束後自動繼續</div>
+        <div v-else-if="canTapNext && tapArmed" class="tap-hint breathe">點擊畫面繼續</div>
       </div>
     </div>
 
-    <!-- 瞄準：只設定自己的陀螺 -->
-    <div class="plate plate--flush aim-plate" v-if="showAimPanel">
-      <div class="aim-strip" :class="mySide === 'B' ? 'is-blue' : 'is-red'">
+    <!-- 瞄準：配置摘要 bar（點擊展開底部抽屜；首屏 HUD+場地+提示不需捲動即可發射） -->
+    <div class="plate plate--flush aim-bar-plate" v-if="showAimPanel">
+      <button type="button" class="loadout-bar" :class="mySide === 'B' ? 'is-blue' : 'is-red'" @click="sheetOpen = true">
         <span class="pulse"></span>
-        <b>{{ mySide === "B" ? "藍方瞄準中" : "紅方瞄準中" }}</b>
-        <span class="sub">拖曳場地發射你的陀螺</span>
+        <strong class="lb-blade">{{ myBlade || "—" }}</strong>
+        <span class="f-badge" :class="mySide === 'B' ? 'f-badge--blue' : 'f-badge--red'">{{ PRESET_LABELS[mySetup.preset] }}</span>
+        <span class="lb-sp">{{ mySetup.special ? SPECIAL_NAMES[mySetup.special] : "無必殺技" }}</span>
         <span v-if="online.opponentJustLaunched.value" class="f-badge f-badge--amber">對手已發射</span>
-        <span v-if="online.aimRemaining.value != null" class="aim-clock">{{ online.aimRemaining.value }}<i>s</i></span>
-      </div>
-      <div class="aim-body">
-        <div class="vs-row">
-          <span class="vs-en">VS</span>
-          <span class="vs-name">{{ online.opponent.value?.nickname ?? "—" }}</span>
-          <span class="f-badge" :class="mySide === 'B' ? 'f-badge--red' : 'f-badge--blue'">
-            {{ PRESET_LABELS[online.opponent.value?.loadout.type ?? "balance"] }}
-          </span>
-        </div>
-        <div class="grid2">
-          <div>
-            <span class="f-label">機體類型</span>
-            <span class="f-select">
-              <select v-model="mySetup.preset" @change="onTypeChange">
-                <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
-              </select>
-            </span>
-          </div>
-          <div>
-            <span class="f-label">旋向</span>
-            <span class="spin-fixed">
-              <BbIcon :name="mySide === 'B' ? 'arrow-clockwise' : 'arrow-counterclockwise'" :size="15" />
-              {{ mySide === "B" ? "左旋（後手）" : "右旋（先手）" }}
-            </span>
-          </div>
-        </div>
-        <div>
-          <span class="f-label">必殺技</span>
-          <span class="f-select">
-            <select v-model="mySetup.special" @change="onSpecialChange">
-              <option value="">無</option>
-              <option value="rush">衝刺突進</option>
-              <option value="blast">衝擊</option>
-              <option value="dash">高速移動</option>
-              <option value="vortex">旋渦</option>
-              <option value="clone">分身</option>
-            </select>
-          </span>
-          <p v-if="mySetup.special" class="spinfo"><BbIcon name="lightning" :size="13" />{{ specialInfo(mySetup.special) }}</p>
-        </div>
-        <div>
-          <span class="f-label">發射模式</span>
-          <div class="seg">
-            <button type="button" :class="{ on: launchMode === 'flick' }" @click="launchMode = 'flick'">甩動<span class="seg-en">FLICK</span></button>
-            <button type="button" :class="{ on: launchMode === 'sling' }" @click="launchMode = 'sling'">拉弓<span class="seg-en">SLING</span></button>
-          </div>
-        </div>
-        <p class="hint">{{ hintText }}</p>
-      </div>
+        <BbIcon name="arrow-right" :size="14" class="lb-chev" />
+      </button>
+      <p class="bar-hint">{{ hintText }}</p>
     </div>
 
-    <!-- 回放控制 + 下一回合（伺服器驅動） -->
+    <!-- 回放控制（單列瘦身：播放/scrub/倍速；續戰改點場地、matchOver 才有「再來一場」鍵） -->
     <div class="plate plate--flush replay-plate" v-else-if="phase === 'playing' && result">
       <div class="replay-row">
         <button class="keybtn" :aria-label="playing ? '暫停' : '播放'" @click="togglePlay">
@@ -404,15 +421,9 @@ function onSpecialChange() {
             <option :value="3">3x</option>
           </select>
         </span>
-        <template v-if="replayDone">
-          <button v-if="snap?.phase === 'finished'" class="f-btn f-btn--primary" @click="online.rematch()">
-            <BbIcon name="arrow-repeat" :size="15" />再來一場
-          </button>
-          <button v-else-if="snap?.phase === 'review'" class="f-btn f-btn--primary" @click="online.nextRound()">
-            下一回合<BbIcon name="arrow-right" :size="15" />
-          </button>
-        </template>
-        <span class="time">{{ currentTime() }}s / {{ result.duration.toFixed(2) }}s</span>
+        <button v-if="replayDone && snap?.phase === 'finished'" class="f-btn f-btn--primary" @click="online.rematch()">
+          <BbIcon name="arrow-repeat" :size="15" />再來一場
+        </button>
       </div>
     </div>
 
@@ -429,15 +440,79 @@ function onSpecialChange() {
       <button v-else class="f-btn f-btn--primary" @click="online.nextRound()">下一回合<BbIcon name="arrow-right" :size="15" /></button>
     </div>
 
-    <!-- 底部 -->
+    <!-- 底部（音效/離開收成低調角落鍵） -->
     <div class="foot">
       <span class="foot-code">#{{ code }}</span>
       <span class="foot-arena">場地：{{ snap?.arenaName ?? bt.arenaName.value }}</span>
-      <button class="keybtn" :aria-label="sfxEnabled ? '關閉音效' : '開啟音效'" @click="sfxEnabled = !sfxEnabled">
-        <BbIcon :name="sfxEnabled ? 'volume-up' : 'volume-mute'" :size="15" />
+      <button class="cornerbtn" :aria-label="sfxEnabled ? '關閉音效' : '開啟音效'" @click="sfxEnabled = !sfxEnabled">
+        <BbIcon :name="sfxEnabled ? 'volume-up' : 'volume-mute'" :size="14" />
       </button>
-      <RouterLink class="f-btn f-btn--ghost foot-leave" to="/"><BbIcon name="door-open" :size="15" />離開</RouterLink>
+      <RouterLink class="cornerbtn" to="/" aria-label="離開房間"><BbIcon name="door-open" :size="14" /></RouterLink>
     </div>
+
+    <!-- 底部抽屜：機體配置（金屬面板由下滑上、半透明 backdrop 點擊收合；fixed 不佔文件流） -->
+    <Transition name="sheet">
+      <div v-if="sheetOpen && showAimPanel" class="sheet-wrap" @click.self="sheetOpen = false">
+        <div class="loadout-sheet">
+          <div class="hazard hazard--thin"></div>
+          <div class="sheet-head" :class="mySide === 'B' ? 'is-blue' : 'is-red'">
+            <span class="pulse"></span>
+            <b>{{ mySide === "B" ? "藍方配置" : "紅方配置" }}</b>
+            <span class="sheet-blade">{{ myBlade }}</span>
+            <button type="button" class="keybtn sheet-close" aria-label="收合" @click="sheetOpen = false">
+              <BbIcon name="arrow-right" :size="14" class="chev-down" />
+            </button>
+          </div>
+          <div class="sheet-body">
+            <div class="vs-row">
+              <span class="vs-en">VS</span>
+              <span class="vs-name">{{ online.opponent.value?.nickname ?? "—" }}</span>
+              <span class="f-badge" :class="mySide === 'B' ? 'f-badge--red' : 'f-badge--blue'">
+                {{ PRESET_LABELS[online.opponent.value?.loadout.type ?? "balance"] }}
+              </span>
+            </div>
+            <div class="grid2">
+              <div>
+                <span class="f-label">機體類型</span>
+                <span class="f-select">
+                  <select v-model="mySetup.preset" @change="onTypeChange">
+                    <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
+                  </select>
+                </span>
+              </div>
+              <div>
+                <span class="f-label">旋向</span>
+                <span class="spin-fixed">
+                  <BbIcon :name="mySide === 'B' ? 'arrow-clockwise' : 'arrow-counterclockwise'" :size="15" />
+                  {{ mySide === "B" ? "左旋（後手）" : "右旋（先手）" }}
+                </span>
+              </div>
+            </div>
+            <div>
+              <span class="f-label">必殺技</span>
+              <span class="f-select">
+                <select v-model="mySetup.special" @change="onSpecialChange">
+                  <option value="">無</option>
+                  <option value="rush">衝刺突進</option>
+                  <option value="blast">衝擊</option>
+                  <option value="dash">高速移動</option>
+                  <option value="vortex">旋渦</option>
+                  <option value="clone">分身</option>
+                </select>
+              </span>
+              <p v-if="mySetup.special" class="spinfo"><BbIcon name="lightning" :size="13" />{{ specialInfo(mySetup.special) }}</p>
+            </div>
+            <div>
+              <span class="f-label">發射模式</span>
+              <div class="seg">
+                <button type="button" :class="{ on: launchMode === 'flick' }" @click="launchMode = 'flick'">甩動<span class="seg-en">FLICK</span></button>
+                <button type="button" :class="{ on: launchMode === 'sling' }" @click="launchMode = 'sling'">拉弓<span class="seg-en">SLING</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -468,18 +543,40 @@ function onSpecialChange() {
 .fighter {
   min-width: 0;
 }
-/* 名牌：暱稱 + 類型章 + 先後手小字（藍側 row-reverse 鏡像） */
+/* 名牌雙行：上行暱稱、下行陀螺名・類型小字（藍側 row-reverse 鏡像） */
 .nameplate {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  row-gap: 3px;
+  flex-direction: column;
+  gap: 3px;
   margin-bottom: 6px;
   min-width: 0;
 }
-.fb .nameplate {
+.np-row,
+.np-sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.fb .np-row,
+.fb .np-sub {
   flex-direction: row-reverse;
+}
+.np-blade {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--steel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.fa .np-blade {
+  color: #f0a08e;
+}
+.fb .np-blade {
+  color: #8ec6ee;
 }
 .np-ava {
   width: 18px;
@@ -662,6 +759,15 @@ function onSpecialChange() {
   text-indent: 0.5em;
   color: var(--muted);
   margin-top: 1px;
+}
+/* 回放中：倒數位置改顯示 REPLAY 小字（維持銘牌高度、不跳版） */
+.timer.is-replay b {
+  font-size: 14px;
+  line-height: 30px;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  color: var(--accent);
+  text-shadow: 0 0 10px rgba(255, 179, 31, 0.45), 0 2px 2px #000;
 }
 /* 倒數 ≤10 秒：轉紅閃爍 */
 .timer.low b {
@@ -1110,23 +1216,64 @@ function onSpecialChange() {
   }
 }
 
-/* ============================================================
-   瞄準面板
-   ============================================================ */
-.aim-plate {
-  --cut: 12px;
+/* ---- 場地下緣小字：點擊續戰呼吸提示 / 對手先行提示 ---- */
+.tap-hint {
+  position: absolute;
+  z-index: 3;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  background: rgba(8, 10, 14, 0.7);
+  padding: 4px 12px;
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 100%, 0 100%);
+  pointer-events: none;
 }
-.aim-strip {
+.tap-hint.breathe {
+  color: var(--accent);
+  animation: tapBreath 1.6s ease-in-out infinite;
+}
+@keyframes tapBreath {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ============================================================
+   瞄準配置摘要 bar + 底部抽屜
+   ============================================================ */
+.aim-bar-plate {
+  --cut: 10px;
+}
+/* 收合態：一條配置摘要 bar（陀螺名+類型+必殺技），點擊向上滑出抽屜 */
+.loadout-bar {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 10px 12px;
+  width: 100%;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  padding: 11px 12px;
   background:
     linear-gradient(90deg, rgba(232, 68, 46, 0.22), transparent 55%),
     linear-gradient(180deg, #23272f, #15181e);
   border-left: 4px solid var(--red);
 }
-.aim-strip.is-blue {
+.loadout-bar.is-blue {
   background:
     linear-gradient(90deg, rgba(46, 159, 232, 0.2), transparent 55%),
     linear-gradient(180deg, #23272f, #15181e);
@@ -1154,13 +1301,16 @@ function onSpecialChange() {
     transform: scale(0.7);
   }
 }
-.aim-strip b {
+.lb-blade {
   font-weight: 900;
-  letter-spacing: 0.18em;
-  font-size: 14px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
-.aim-strip .sub {
+.lb-sp {
   flex: 1;
   min-width: 0;
   font-size: 10px;
@@ -1170,27 +1320,98 @@ function onSpecialChange() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.aim-clock {
+.lb-chev {
   flex: none;
-  font-family: var(--f-d);
-  font-weight: 800;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--white-hot);
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 0 12px rgba(255, 179, 31, 0.5);
+  color: var(--accent);
+  transform: rotate(-90deg); /* 箭頭朝上＝抽屜向上滑出 */
 }
-.aim-clock i {
-  font-style: normal;
-  font-size: 12px;
+.bar-hint {
+  margin: 0;
+  padding: 7px 12px 9px;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--muted);
-  margin-left: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.aim-body {
+/* ---- 展開態：fixed 底部抽屜（半透明 backdrop、HUD 仍可見） ---- */
+.sheet-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  background: rgba(5, 6, 10, 0.5);
+}
+.loadout-sheet {
+  width: min(480px, 100%);
+  max-height: 76vh;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #23272f, #15181e 55%, #101319);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.6);
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  background: linear-gradient(90deg, rgba(232, 68, 46, 0.22), transparent 55%);
+  border-left: 4px solid var(--red);
+}
+.sheet-head.is-blue {
+  background: linear-gradient(90deg, rgba(46, 159, 232, 0.2), transparent 55%);
+  border-left-color: var(--blue);
+}
+.sheet-head b {
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.sheet-blade {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-close {
+  width: 38px;
+  height: 34px;
+}
+.chev-down {
+  transform: rotate(90deg);
+}
+.sheet-body {
   padding: 13px 12px 14px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* 抽屜進出場：面板 0.25s 由下滑上、backdrop 同步淡入淡出 */
+.sheet-enter-active,
+.sheet-leave-active {
+  transition: opacity 0.25s ease;
+}
+.sheet-enter-active .loadout-sheet,
+.sheet-leave-active .loadout-sheet {
+  transition: transform 0.25s cubic-bezier(0.25, 0.9, 0.3, 1);
+}
+.sheet-enter-from,
+.sheet-leave-to {
+  opacity: 0;
+}
+.sheet-enter-from .loadout-sheet,
+.sheet-leave-to .loadout-sheet {
+  transform: translateY(100%);
 }
 .vs-row {
   display: flex;
@@ -1320,17 +1541,9 @@ function onSpecialChange() {
   right: 10px;
 }
 .replay-row .f-btn {
-  font-size: 14px;
-  padding: 8px 14px;
-}
-.replay-row .time {
-  flex-basis: 100%;
-  text-align: center;
-  font-family: var(--f-d);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  flex: none;
+  font-size: 13px;
+  padding: 8px 12px;
 }
 .fallback-panel {
   display: flex;
@@ -1374,8 +1587,21 @@ function onSpecialChange() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.foot-leave {
-  font-size: 14px;
-  padding: 8px 14px;
+/* 低調角落鍵：音效 / 離開房間（icon-only、不搶視覺） */
+.cornerbtn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  border: 1px solid var(--line);
+  background: rgba(10, 12, 16, 0.55);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.cornerbtn:hover {
+  color: var(--accent);
+  border-color: rgba(255, 179, 31, 0.45);
 }
 </style>

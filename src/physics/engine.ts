@@ -25,22 +25,24 @@ import { rimAt, softWallRadiusAt, softWallNormalAt, softWallAccelAt } from "./ar
 
 /** 必殺技數值（集中可調，可被 SimConfig.special 覆寫） */
 export const DEFAULT_SPECIAL: SpecialConfig = {
-  // rush 突進：降機率/次數 + 大砍衝撞速度與傷害（衝撞才是主要殺傷）
+  // 開場緩衝：前 3 秒所有必殺技不得觸發（讓開場對撞先定調，必殺不搶戲）
+  graceTime: 3.0,
+  // rush 突進：降機率/次數 + 大砍衝撞速度；傷害調高 → 裝了要明顯比不裝強
   rushChance: 0.14,
   rushRange: 110,
   rushSpeed: 80,
-  rushDamage: 70,
+  rushDamage: 100,
   rushCooldown: 6.0,
   rushMaxUses: 2,
-  // blast 衝擊：靠擊出界贏（對 push/damage 大小不敏感）→ 降機率 + 砍擊退（少擊出界）
+  // blast 衝擊：靠擊出界贏（對 push 大小不敏感）→ 降機率 + 砍擊退（少擊出界）；傷害調高
   blastChance: 0.1,
   blastImpactMin: 90,
   blastPush: 70,
-  blastDamage: 60,
+  blastDamage: 85,
   blastCooldown: 5.0,
   blastMaxUses: 2,
 
-  // dash 高速移動：「續命第二風」。回補壓到 ~60（≈多撐 1 秒）、加速更溫和，只是小幫助
+  // dash 高速移動：「續命第二風」。回補壓到 ~60（≈多撐 1 秒）、加速更溫和 + 觸發回血 10% maxHp
   dashChance: 0.5,
   dashCooldown: 8,
   dashMaxUses: 1,
@@ -49,29 +51,30 @@ export const DEFAULT_SPECIAL: SpecialConfig = {
   dashDuration: 2.0,
   dashAccel: 80,
   dashMaxSpeedMul: 0.45,
+  dashHealFrac: 0.1,
 
-  // vortex 旋渦：拉力溫和 + 抽旋壓到 ~45/s（靠拉進來磨而非抽乾）
+  // vortex 旋渦：拉力溫和 + 抽旋壓到 ~45/s（靠拉進來磨而非抽乾）；持續拉長 +40%
   vortexChance: 0.55,
   vortexCooldown: 8,
   vortexMaxUses: 2,
   vortexSpinDrain: 45,
   vortexRange: 220,
   vortexPull: 240,
-  vortexDuration: 1.6,
+  vortexDuration: 2.2,
 
-  // clone 分身：降機率 + 縮短 + 降分身攻擊
-  cloneChance: 0.2,
+  // clone 分身：高機率 + 可發兩次 + 單次低傷（總期望傷害略升）
+  cloneChance: 0.35,
   cloneCooldown: 10,
-  cloneMaxUses: 1,
+  cloneMaxUses: 2,
   cloneRange: 260,
   cloneDuration: 2.0,
-  cloneAttackMul: 0.35,
+  cloneAttackMul: 0.25,
   cloneSpin: 2000,
   cloneHoming: 280,
 };
 
 /** 血量（耐久條）基準預設：maxHp = hpBase × 重量 */
-export const HP_BASE = 1250;
+export const HP_BASE = 1100;
 export function maxHpFor(stats: BeybladeStats, hpBase: number = HP_BASE): number {
   return hpBase * Math.max(0.2, stats.weight);
 }
@@ -94,11 +97,17 @@ interface Body {
   spin: number;
   hp: number;
   maxHp: number;
+  /** 初始自旋（同步雙停轉 tie-break 的 spin 超過量分母） */
+  maxSpin: number;
   spinDir: number;
   angle: number;
   alive: boolean;
   deadAtStep: number;
   deathReason: WinReason | null;
+  /** 死亡瞬間的原始 hp（未夾 0，可為負）→ 同步雙亡比「超殺深度」用 */
+  hpAtDeath: number;
+  /** 死亡瞬間的原始 spin（未夾 0，可為負）→ 同步雙停轉 tie-break 用 */
+  spinAtDeath: number;
   special: SpecialKind | "";
   prevInRange: boolean;
   /** 必殺技冷卻：到此時間（秒）才可再次發動 */
@@ -130,15 +139,15 @@ export const DEFAULT_ARENA: ArenaConfig = {
   centerPull: 90,
   friction: 0.5,
   swirl: 110,
-  spinDecayBase: 70,
+  spinDecayBase: 56,
   restitution: 0.6,
-  collisionSpinLoss: 0.45,
-  knockback: 1.5,
+  collisionSpinLoss: 1.36,
+  knockback: 1.8,
   oppSpinBonus: 1.5,
-  spinKnockback: 0.1,
+  spinKnockback: 0.14,
   wallBounce: 0.7,
   wallSpinLoss: 0.12,
-  ringOutSpeed: 190,
+  ringOutSpeed: 160,
   gravity: 900,
   jumpPop: 0.15,
   jumpOverHeight: 34,
@@ -291,11 +300,14 @@ function makeClone(owner: Body, sc: SpecialConfig): Body {
     spin: 0,
     hp: 1e9,
     maxHp: 1e9,
+    maxSpin: 1,
     spinDir: owner.spinDir,
     angle: 0,
     alive: false,
     deadAtStep: -1,
     deathReason: null,
+    hpAtDeath: NaN,
+    spinAtDeath: NaN,
     special: "",
     prevInRange: false,
     specialReadyT: 0,
@@ -337,11 +349,14 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
     spin: b.spin,
     hp: maxHpFor(b.stats, arena.hpBase),
     maxHp: maxHpFor(b.stats, arena.hpBase),
+    maxSpin: Math.max(1, b.spin),
     spinDir: b.spinDir ?? 1,
     angle: 0,
     alive: true,
     deadAtStep: -1,
     deathReason: null,
+    hpAtDeath: NaN,
+    spinAtDeath: NaN,
     special: b.special ?? "",
     prevInRange: false,
     specialReadyT: 0,
@@ -612,15 +627,18 @@ function resolveCollisions(
 
       // 碰撞傷害扣「血量（耐久）」：攻擊 / 防禦 + 旋向加成參與。
       // 自旋只隨時間衰減，碰撞不直接扣自旋 → 攻擊型靠撞擊扣血、但需在自己續航耗盡前擊破。
+      // 最終值各自乘 ±10% 浮動（seeded rng → 同 seed 仍逐位元一致）：避免完全對稱輸入打出完全平手。
       const impact = Math.abs(velAlongNormal);
       const dmg = impact * arena.collisionSpinLoss * clash;
-      a.hp -= dmg * clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4);
-      b.hp -= dmg * clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4);
+      const dmgA = dmg * clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4) * (0.9 + rng() * 0.2);
+      const dmgB = dmg * clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4) * (0.9 + rng() * 0.2);
+      a.hp -= dmgA;
+      b.hp -= dmgB;
 
       // 接觸點（a 表面朝 b）→ 火花特效定位；只記「夠猛」的撞擊，避免摩擦微震洗版
       const cx = a.px + nx * a.radius;
       const cy = a.py + ny * a.radius;
-      if (impact > 25) collisionEvents.push({ t, x: cx, y: cy, impact });
+      if (impact > 25) collisionEvents.push({ t, x: cx, y: cy, impact, aId: a.id, bId: b.id, dmgA, dmgB });
 
       // 猛烈碰撞把雙方頂向空中（2.5D 彈跳）
       const pop = impact * arena.jumpPop * clash;
@@ -640,8 +658,8 @@ function resolveCollisions(
         a.vy -= ny * impact * spinK * bSpinN;
       }
 
-      // 必殺技【衝擊】：裝備者打出夠猛的一擊（impact>門檻）+ 過冷卻 + 本回合還有次數 → 機率把對手彈開 + 扣血
-      if (impact > sc.blastImpactMin) {
+      // 必殺技【衝擊】：裝備者打出夠猛的一擊（impact>門檻）+ 過開場緩衝 + 過冷卻 + 本回合還有次數 → 機率把對手彈開 + 扣血
+      if (impact > sc.blastImpactMin && t >= sc.graceTime) {
         // a 衝擊 b：把 b 沿法線（遠離 a）方向彈開
         if (a.special === "blast" && b.alive && t >= a.specialReadyT && a.specialUsesLeft > 0 && rng() < sc.blastChance) {
           b.vx += nx * sc.blastPush;
@@ -725,9 +743,10 @@ function applySpecials(
     }
 
     // === 觸發 ===
+    // 統一閘門：開場緩衝（graceTime）內所有必殺技不得觸發（持續效果不受影響——緩衝內根本觸發不了）。
     const opp = nearestEnemy(bodies, b);
     const best = opp ? Math.hypot(opp.px - b.px, opp.py - b.py) : Infinity;
-    const ready = t >= b.specialReadyT && b.specialUsesLeft > 0;
+    const ready = t >= sc.graceTime && t >= b.specialReadyT && b.specialUsesLeft > 0;
 
     if (b.special === "rush") {
       const inRange = opp !== null && best < sc.rushRange;
@@ -748,14 +767,16 @@ function applySpecials(
       }
       b.prevInRange = inRange;
     } else if (b.special === "dash") {
-      // 自旋偏低時觸發 → 回補自旋 + 進入加速狀態
+      // 自旋偏低時觸發 → 回補自旋 + 回血（maxHp × dashHealFrac，夾制不超過 maxHp）+ 進入加速狀態
       const spinNorm = b.spin / DEFAULT_SCALES.maxSpin;
       if (ready && spinNorm < sc.dashTriggerSpin && rng() < sc.dashChance) {
         b.spin += sc.dashSpinRestore;
+        const heal = Math.max(0, Math.min(b.maxHp * sc.dashHealFrac, b.maxHp - b.hp));
+        b.hp += heal;
         b.dashUntilT = t + sc.dashDuration;
         b.specialReadyT = t + sc.dashCooldown;
         b.specialUsesLeft -= 1;
-        events.push({ t, id: b.id, kind: "dash", x: b.px, y: b.py });
+        events.push({ t, id: b.id, kind: "dash", x: b.px, y: b.py, heal });
       }
     } else if (b.special === "vortex") {
       const inRange = opp !== null && best < sc.vortexRange;
@@ -843,9 +864,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
       const overY = b.py > lim ? 1 : b.py < -lim ? -1 : 0;
       // 越過邊界、且落在角落開口（該段沒有牆）→ 出界（分身不出界：略過 → 落到下面當實牆夾回反彈）
       if (!b.isClone && ((overX !== 0 && nearCornerY) || (overY !== 0 && nearCornerX))) {
-        b.alive = false;
-        b.deadAtStep = step;
-        b.deathReason = "ring-out";
+        markDead(b, step, "ring-out");
         b.ringOutAngle = Math.atan2(b.py, b.px);
         continue;
       }
@@ -883,9 +902,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
 
     // 被打得夠猛 → 衝出護牆，判定出界（記下出界角度供計分分區用）。分身不出界 → 略過，落到下面當實牆反彈。
     if (radialVel > rp.ringOutSpeed && !b.isClone) {
-      b.alive = false;
-      b.deadAtStep = step;
-      b.deathReason = "ring-out";
+      markDead(b, step, "ring-out");
       b.ringOutAngle = ang;
       continue;
     }
@@ -902,6 +919,15 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
   }
 }
 
+/** 標記淘汰，並保留死亡瞬間的原始 hp/spin（未夾 0、可為負）→ 同步雙亡比「超殺深度」用 */
+function markDead(b: Body, step: number, reason: WinReason): void {
+  b.alive = false;
+  b.deadAtStep = step;
+  b.deathReason = reason;
+  b.hpAtDeath = b.hp;
+  b.spinAtDeath = b.spin;
+}
+
 function checkDeaths(bodies: Body[], arena: ArenaConfig, step: number): void {
   for (const b of bodies) {
     if (!b.alive) continue;
@@ -909,19 +935,15 @@ function checkDeaths(bodies: Body[], arena: ArenaConfig, step: number): void {
 
     // 血量歸零 → 擊破 KO
     if (b.hp <= 0) {
+      markDead(b, step, "ko");
       b.hp = 0;
-      b.alive = false;
-      b.deadAtStep = step;
-      b.deathReason = "ko";
       continue;
     }
 
     // 停轉判負
     if (b.spin <= 0) {
+      markDead(b, step, "spin-out");
       b.spin = 0;
-      b.alive = false;
-      b.deadAtStep = step;
-      b.deathReason = "spin-out";
       continue;
     }
 
@@ -929,12 +951,28 @@ function checkDeaths(bodies: Body[], arena: ArenaConfig, step: number): void {
     if (!arena.box) {
       const distFromCenter = Math.hypot(b.px, b.py);
       if (distFromCenter > arena.radius) {
-        b.alive = false;
-        b.deadAtStep = step;
-        b.deathReason = "ring-out";
+        markDead(b, step, "ring-out");
       }
     }
   }
+}
+
+/**
+ * 同步「同類」雙亡 tie-break：比超殺深度，較不慘者勝。
+ * 主指標 = 死亡瞬間 hp/maxHp（雙擊破時為負 → 較不負者勝；雙停轉/雙出界時為剩餘血量比例）。
+ * hp 比例完全相等（傷害 ±10% 獨立浮動下幾乎不可能）才比 spin/maxSpin 超過量；再相等 → null = 平手。
+ * 只讀模擬內既有狀態（markDead 記下的未夾 0 數值），不引入新隨機 → 確定性不破。
+ */
+function overkillTieBreak(a: Body, b: Body): Body | null {
+  const hpRatio = (x: Body) => (Number.isFinite(x.hpAtDeath) ? x.hpAtDeath : x.hp) / Math.max(1, x.maxHp);
+  const ha = hpRatio(a);
+  const hb = hpRatio(b);
+  if (ha !== hb) return ha > hb ? a : b;
+  const spinRatio = (x: Body) => (Number.isFinite(x.spinAtDeath) ? x.spinAtDeath : x.spin) / Math.max(1, x.maxSpin);
+  const sa = spinRatio(a);
+  const sb = spinRatio(b);
+  if (sa !== sb) return sa > sb ? a : b;
+  return null;
 }
 
 function determineOutcome(allBodies: Body[]): {
@@ -956,17 +994,27 @@ function determineOutcome(allBodies: Body[]): {
   }
 
   if (alive.length === 0) {
-    // 都陣亡：較晚陣亡者獲勝；同一步陣亡則平手
+    // 都陣亡：較晚陣亡者獲勝
     const sorted = [...bodies].sort((x, y) => y.deadAtStep - x.deadAtStep);
     const [first, second] = sorted;
-    if (!second || first.deadAtStep === second.deadAtStep) {
-      return { winnerId: null, loserId: null, reason: "draw" };
+    if (!second) return { winnerId: null, loserId: null, reason: "draw" };
+    if (first.deadAtStep !== second.deadAtStep) {
+      return {
+        winnerId: first.id,
+        loserId: second.id,
+        reason: second.deathReason ?? "draw",
+      };
     }
-    return {
-      winnerId: first.id,
-      loserId: second.id,
-      reason: second.deathReason ?? "draw",
-    };
+    // 同一步雙亡：「同類死法」才比超殺深度 tie-break（雙擊破/雙停轉/雙出界）；
+    // 死法不同（混合同步）維持現行優先序 = 平手。tie-break 只用模擬內既有狀態 → 確定性不變。
+    if (first.deathReason && first.deathReason === second.deathReason) {
+      const winner = overkillTieBreak(first, second);
+      if (winner) {
+        const loser = winner === first ? second : first;
+        return { winnerId: winner.id, loserId: loser.id, reason: first.deathReason };
+      }
+    }
+    return { winnerId: null, loserId: null, reason: "draw" };
   }
 
   // 多者存活（timeout）：比剩餘體力（續航 + 血量，各自正規化後相加）

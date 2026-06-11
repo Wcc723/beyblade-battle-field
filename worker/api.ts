@@ -16,6 +16,7 @@ import type { SessionData } from "./session";
 import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../src/physics/types";
 import { DEFAULT_ARENA, XTREME_STADIUM, DEFAULT_SPECIAL } from "../src/physics/engine";
 import { STAT_PRESETS } from "../src/physics/presets";
+import { autoNickname } from "../src/game/names";
 
 export const CONFIG_KEYS = ["arena", "stats", "special"] as const;
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -29,7 +30,9 @@ function defaultConfigValue(key: ConfigKey): unknown {
           { id: "default", name: "預設場地", config: { ...DEFAULT_ARENA } },
           { id: "builtin-xtreme", name: "Beyblade X · Xtreme Stadium", config: { ...XTREME_STADIUM }, builtin: true },
         ],
-        activeId: "default",
+        // 預設啟用 Xtreme（正式對戰現役場地）：migration 0004 清除 D1 blob 後回落到這裡，
+        // 若預設是圓形場會讓正式站默默換場。
+        activeId: "builtin-xtreme",
       };
     case "stats":
       return Object.fromEntries(Object.entries(STAT_PRESETS).map(([k, v]) => [k, { ...v }]));
@@ -161,9 +164,29 @@ export async function handleGetSettings(env: Env, session: SessionData): Promise
       sfx: number;
       replay_speed: number;
     }>();
+  // 暱稱為空（新用戶或從未改名）→ 指派系統代號並持久化寫回：之後回傳的 nickname 永遠非空
+  let nickname = (row?.nickname ?? "").trim();
+  if (!nickname) {
+    nickname = autoNickname(session.uid);
+    try {
+      await env.DB.prepare(
+        `INSERT INTO user_settings (user_id, nickname, updated_at) VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(user_id) DO UPDATE SET nickname = excluded.nickname, updated_at = excluded.updated_at`,
+      )
+        .bind(session.uid, nickname)
+        .run();
+    } catch (err) {
+      // session 指向已刪除的 user（FK 失敗）→ 視為 session 失效，不是伺服器錯誤（與 PUT 同一道防線）
+      if (String(err).includes("FOREIGN KEY")) {
+        return Response.json({ error: "session_user_missing" }, { status: 401 });
+      }
+      // 其他寫入失敗不擋讀取：本次仍回自動代號，下次 GET 會再補寫
+      console.error("auto nickname persist failed", err);
+    }
+  }
   const settings: UserSettings = row
     ? {
-        nickname: row.nickname,
+        nickname,
         defaultType: row.default_type,
         defaultSpin: row.default_spin,
         defaultSpecial: row.default_special,
@@ -172,8 +195,7 @@ export async function handleGetSettings(env: Env, session: SessionData): Promise
         replaySpeed: row.replay_speed,
       }
     : {
-        // 與 PUT 同一套規則（trim + 20 字截斷），避免預填值存檔後被靜默截斷
-        nickname: (session.name || session.email.split("@")[0]).trim().slice(0, 20),
+        nickname,
         defaultType: "balance",
         defaultSpin: "right",
         defaultSpecial: "",

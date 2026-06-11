@@ -626,6 +626,241 @@ export function useBattle(opts: UseBattleOptions = {}) {
     return s - Math.floor(s);
   }
 
+  /* —— 打擊感視覺層（純呈現、不進引擎；震動抖動方向可用瀏覽器亂數） —— */
+  // 動態縮減偏好：查一次即可（OS 設定改了要重整頁面，可接受）；開啟時關閉場地震動
+  const reducedMotion =
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
+  // 每幀粒子預算（放射火花/碎屑/焊接火星共用）：密集強撞時保幀優先於華麗（行動裝置）
+  const PARTICLE_BUDGET = 120;
+  let particleBudget = PARTICLE_BUDGET;
+
+  /* —— 場地震動：觸發/振幅由 curT 推導（scrub 也穩），每幀位移方向用亂數抖 ——
+   * 注意振幅是 canvas 內部座標（640px 寬），手機顯示時會縮到約 0.55~0.6 倍，
+   * 所以這裡的 px 要比「想要的視覺位移」大近一倍才有感。 */
+  const SHAKE_IMPACT_MIN = 80; // 強撞門檻（沿法線接近速度；與焊接火星同步——會噴火星的撞擊就會震）
+  const SHAKE_MAX = 18; // 撞擊震幅上限 px（canvas 座標）
+  const SHAKE_DECAY = 8; // 指數衰減速率 → 約 0.45s 內歸零
+  function shakeAmpAt(curT: number): number {
+    if (reducedMotion) return 0;
+    const r = result.value;
+    if (!r) return 0;
+    let amp = 0;
+    for (const ce of r.collisionEvents) {
+      if (ce.impact < SHAKE_IMPACT_MIN) continue;
+      const age = curT - ce.t;
+      if (age < 0 || age >= 0.45) continue;
+      const a0 = Math.min(SHAKE_MAX, 5 + ((ce.impact - SHAKE_IMPACT_MIN) / 140) * (SHAKE_MAX - 5));
+      amp = Math.max(amp, a0 * Math.exp(-age * SHAKE_DECAY));
+    }
+    // KO / 出界瞬間：一次大震（停轉是緩慢收尾、不震）
+    for (const de of r.deathEvents) {
+      if (de.reason === "spin-out") continue;
+      const age = curT - de.t;
+      if (age < 0 || age >= 0.6) continue;
+      amp = Math.max(amp, (de.reason === "ko" ? 26 : 19) * Math.exp(-age * 7));
+    }
+    return amp < 0.3 ? 0 : amp;
+  }
+
+  /* —— 傷害數字：跨過 collisionEvents 在受傷陀螺上方彈「-N」，dash 回血彈「+N」 —— */
+  const DMG_POP_DUR = 0.8; // 上浮 + 淡出時長
+  // 全場傷害統計（彈出門檻 = 平均 × 0.35：微小摩擦傷害不彈避免洗版）；以 result 參照做快取
+  let dmgStatCache: { for: SimResult; thr: number; avg: number } | null = null;
+  function dmgPopStats(r: SimResult): { thr: number; avg: number } {
+    if (dmgStatCache && dmgStatCache.for === r) return dmgStatCache;
+    let sum = 0;
+    let n = 0;
+    for (const ce of r.collisionEvents) {
+      if (ce.dmgA != null) {
+        sum += ce.dmgA;
+        n++;
+      }
+      if (ce.dmgB != null) {
+        sum += ce.dmgB;
+        n++;
+      }
+    }
+    const avg = n ? sum / n : 0;
+    dmgStatCache = { for: r, thr: Math.max(2, avg * 0.35), avg };
+    return dmgStatCache;
+  }
+  /** 傷害字色：琥珀（小傷）→ 紅（大傷），heat 0~1。 */
+  function dmgColor(heat: number): string {
+    const c1 = [255, 179, 31]; // --accent 琥珀
+    const c2 = [232, 68, 46]; // --red
+    const m = c1.map((v, i) => Math.round(v + (c2[i] - v) * heat));
+    return `rgb(${m[0]},${m[1]},${m[2]})`;
+  }
+  /** 單顆浮動數字：上浮（ease-out）+ 末段淡出，深色描邊保可讀性（display 字感）。 */
+  function drawOnePop(g: CanvasRenderingContext2D, x: number, y: number, txt: string, color: string, fontPx: number, age: number, seed: number) {
+    const p = age / DMG_POP_DUR;
+    const ease = 1 - (1 - p) * (1 - p);
+    const alpha = p < 0.55 ? 1 : Math.max(0, (1 - p) / 0.45);
+    const px = x + (hash01(seed * 17.7) - 0.5) * scaleLen(26); // 同一顆連續彈 → 橫向錯開不疊字
+    const py = y - scaleLen(36) - (scaleLen(34) + fontPx * 0.4) * ease;
+    g.globalAlpha = alpha;
+    g.font = `900 ${fontPx}px 'Big Shoulders Display', 'Noto Sans TC', sans-serif`;
+    g.lineWidth = Math.max(3, fontPx * 0.16);
+    g.strokeStyle = "rgba(5,8,13,0.85)";
+    g.strokeText(txt, px, py);
+    g.fillStyle = color;
+    g.fillText(txt, px, py);
+  }
+  /** 傷害/回血數字層（最上層）：位置取「事件當下」幀的陀螺座標（數字釘在受擊點上方）。 */
+  function drawDamagePops(g: CanvasRenderingContext2D, curT: number, frames: Frame[]) {
+    const r = result.value;
+    if (!r) return;
+    const { thr, avg } = dmgPopStats(r);
+    g.save();
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    for (let k = 0; k < r.collisionEvents.length; k++) {
+      const ce = r.collisionEvents[k];
+      const age = curT - ce.t;
+      if (age < 0 || age >= DMG_POP_DUR) continue;
+      const fb = frames[Math.min(frames.length - 1, Math.round(ce.t * 60))];
+      const pops: [string | undefined, number | undefined][] = [
+        [ce.aId, ce.dmgA],
+        [ce.bId, ce.dmgB],
+      ];
+      for (let pi = 0; pi < 2; pi++) {
+        const [id, dmg] = pops[pi];
+        if (!id || dmg == null || dmg < thr) continue; // 舊回放資料無傷害欄位 → 不彈
+        const n = Math.round(dmg);
+        if (n < 1) continue;
+        const body = fb.bodies.find((x) => x.id === id);
+        if (!body) continue;
+        const heat = Math.min(1, dmg / Math.max(1, avg * 2.2)); // 平均的 2.2 倍 → 全紅最大字
+        const [bx, by] = toCanvas(body.x, body.y);
+        drawOnePop(g, bx, by, `-${n}`, dmgColor(heat), Math.round(17 + 17 * heat), age, k * 2 + pi);
+      }
+    }
+    // dash 回血：綠色「+N」（--ok）
+    for (let k = 0; k < r.specialEvents.length; k++) {
+      const se = r.specialEvents[k];
+      if (se.kind !== "dash" || !se.heal) continue;
+      const age = curT - se.t;
+      if (age < 0 || age >= DMG_POP_DUR) continue;
+      const n = Math.round(se.heal);
+      if (n < 1) continue;
+      const [bx, by] = toCanvas(se.x, se.y);
+      drawOnePop(g, bx, by, `+${n}`, "#57d96b", 22, age, 101 + k * 3);
+    }
+    g.restore();
+  }
+
+  /* —— 陀螺動態強化 —— */
+  function hexRgb(col: string): [number, number, number] {
+    const v = parseInt(col.slice(1), 16);
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  }
+  /** 自旋光暈：隊色光圈隨 spin 比例呼吸（轉越快越亮、呼吸越快；快沒力時黯淡）。 */
+  function drawSpinGlow(g: CanvasRenderingContext2D, bx: number, by: number, col: string, spinN: number, curT: number) {
+    if (spinN <= 0.02) return;
+    const [cr, cg, cb] = hexRgb(col);
+    const breath = 0.78 + 0.22 * Math.sin(curT * (2.2 + spinN * 6.5));
+    const R = scaleLen(26 * (1.55 + spinN * 0.45));
+    const grad = g.createRadialGradient(bx, by, scaleLen(10), bx, by, R);
+    grad.addColorStop(0, `rgba(${cr},${cg},${cb},0)`);
+    grad.addColorStop(0.55, `rgba(${cr},${cg},${cb},0.3)`);
+    grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    g.save();
+    g.globalAlpha = (0.22 + 0.55 * spinN) * breath;
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(bx, by, R, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  }
+  /** 高速動態：殘影（過去幀低透明同款陀螺）+ 速度線（移動反方向短線），速度超過門檻才畫。 */
+  const SPEED_FX_MIN = 150; // 世界單位/s（≈ maxSpeed 340 的 44%）
+  function drawSpeedFx(g: CanvasRenderingContext2D, id: string, frames: Frame[], idx: number, col: string) {
+    const i0 = Math.max(0, idx - 3);
+    if (i0 === idx) return;
+    const pa = frames[i0].bodies.find((x) => x.id === id);
+    const pb = frames[idx].bodies.find((x) => x.id === id);
+    if (!pa || !pb) return;
+    const dx = pb.x - pa.x;
+    const dy = pb.y - pa.y;
+    const dist = Math.hypot(dx, dy);
+    const spd = dist / ((idx - i0) / 60);
+    if (spd < SPEED_FX_MIN || dist < 1e-3) return;
+    const k = Math.min(1, (spd - SPEED_FX_MIN) / (DEFAULT_SCALES.maxSpeed - SPEED_FX_MIN));
+    // 殘影：最多 2 個，越舊越淡（隊色低透明）
+    for (let j = 1; j <= 2; j++) {
+      const fi = idx - j * 4;
+      if (fi < 0) break;
+      const tb = frames[fi].bodies.find((x) => x.id === id);
+      if (!tb) continue;
+      drawTop(g, tb.x, tb.y, tb.z ?? 0, tb.angle, col, 26, true, presetOf(id), 0.16 * k * (1 - (j - 1) * 0.45));
+    }
+    // 速度線：白 + 隊色交錯，長度隨速度
+    const ux = dx / dist;
+    const uy = -dy / dist; // canvas y 翻轉
+    const nx = -uy;
+    const ny = ux;
+    const [bx, by] = toCanvas(pb.x, pb.y);
+    g.save();
+    g.lineCap = "round";
+    for (let i = 0; i < 3; i++) {
+      const off = (i - 1) * scaleLen(13);
+      const jit = hash01(idx * 0.7 + i * 11.3); // 隨幀微變（仍確定性 → scrub 穩）
+      const len = scaleLen(20 + 42 * k) * (0.6 + jit * 0.5);
+      const sx = bx + nx * off - ux * scaleLen(20);
+      const sy = by + ny * off - uy * scaleLen(20);
+      g.globalAlpha = 0.28 * k * (0.5 + jit * 0.5);
+      g.strokeStyle = i === 1 ? "#ffffff" : col;
+      g.lineWidth = 1.8;
+      g.beginPath();
+      g.moveTo(sx, sy);
+      g.lineTo(sx - ux * len, sy - uy * len);
+      g.stroke();
+    }
+    g.restore();
+  }
+  /** 焊接火星（mockup 語彙）：強撞接觸點噴出帶重力下墜的火星 streak，lighter 疊加發光。 */
+  function drawEmbers(g: CanvasRenderingContext2D, curT: number) {
+    const evs = result.value?.collisionEvents;
+    if (!evs) return;
+    const DUR = 0.66; // 比火花長一點的餘韻（落地熄滅）
+    const GRAV = 980; // 世界單位/s² 下墜
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    g.lineCap = "round";
+    for (let k = 0; k < evs.length; k++) {
+      const ce = evs[k];
+      const s = Math.min(1, ce.impact / 230);
+      if (s < 0.35) continue; // 強撞才噴火星
+      const age = curT - ce.t;
+      if (age < 0 || age >= DUR) continue;
+      const a = age / DUR;
+      const [ex, ey] = toCanvas(ce.x, ce.y);
+      const n = 6 + Math.floor(s * 12);
+      for (let i = 0; i < n; i++) {
+        if (particleBudget-- <= 0) break;
+        const ang = hash01(k * 19.3 + i * 3.7) * Math.PI * 2;
+        const sp = (60 + hash01(k * 5.1 + i * 1.3) * 240) * (0.5 + s * 0.7);
+        const vx = Math.cos(ang) * sp;
+        const vy = Math.sin(ang) * sp - 70; // 初速略向上 → 拋物線
+        const x = ex + scaleLen(vx * age);
+        const y = ey + scaleLen(vy * age + 0.5 * GRAV * age * age);
+        const cvy = vy + GRAV * age;
+        const fade = 1 - a;
+        const r = hash01(k * 3.3 + i * 7.1);
+        g.globalAlpha = fade * (0.5 + s * 0.5);
+        g.strokeStyle = a > 0.62 ? "#a13218" : r < 0.5 ? "#ffd24d" : "#ff7a18"; // 白熱→熔岩→暗紅熄滅
+        g.lineWidth = 1.4 + fade;
+        g.beginPath();
+        g.moveTo(x, y);
+        g.lineTo(x - scaleLen(vx * 0.022), y - scaleLen(cvy * 0.022));
+        g.stroke();
+      }
+    }
+    g.restore();
+  }
+
   /** 碰撞火花：強弱依 impact（門檻調低 → 同力道更猛），衝擊波環 + 發光爆閃 + 放射火花。 */
   function drawSparks(g: CanvasRenderingContext2D, curT: number) {
     const evs = result.value?.collisionEvents;
@@ -685,6 +920,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
       const n = 10 + Math.floor(s * 24);
       const reach = scaleLen(22 + s * 72);
       for (let i = 0; i < n; i++) {
+        if (particleBudget-- <= 0) break; // 每幀粒子預算（保幀）
         const ang = hash01(k * 41.7 + i * 2.3) * Math.PI * 2;
         const spd = 0.5 + hash01(k * 13.1 + i * 5.7) * 0.5;
         const d0 = reach * a * spd;
@@ -706,6 +942,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
         const m = Math.floor(s * 10);
         g.fillStyle = "#ffd24d";
         for (let i = 0; i < m; i++) {
+          if (particleBudget-- <= 0) break; // 每幀粒子預算（保幀）
           const ang = hash01(k * 53.1 + i * 7.7) * Math.PI * 2;
           const sp = 0.5 + hash01(k * 29.3 + i) * 0.5;
           const dd = scaleLen(20 + s * 80) * a * sp;
@@ -967,6 +1204,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
   function draw() {
     if (!ctx) return;
     const g = ctx;
+    particleBudget = PARTICLE_BUDGET; // 每幀重置粒子預算
     const { cx, cy, R } = drawArena(g);
 
     if (phase.value === "playing" && result.value) {
@@ -978,6 +1216,10 @@ export function useBattle(opts: UseBattleOptions = {}) {
       const idx = i0;
       const frame = lerpFrame(frames[i0], frames[i1], ph - i0);
       const curT = ph / 60; // dt=1/60、sampleEvery=1 → 幀索引即 t*60
+      // 場地震動：強撞/擊破/出界時整個 canvas 內容做衰減隨機偏移（reduced-motion 時關閉）
+      const shakeAmp = shakeAmpAt(curT);
+      g.save();
+      if (shakeAmp > 0) g.translate((Math.random() * 2 - 1) * shakeAmp, (Math.random() * 2 - 1) * shakeAmp);
       // 軌跡尾巴：從尾(細透明)漸變到頭(粗實) → 更明顯、可辨隊伍
       const TAIL = 46;
       for (const b of frame.bodies) {
@@ -1023,6 +1265,12 @@ export function useBattle(opts: UseBattleOptions = {}) {
         }
         if (!b.alive && koIds.has(b.id)) continue; // 擊破者交給破碎特效
         const col = colorOf(b.id);
+        if (b.alive) {
+          // 自旋光暈（隨 spin 比例呼吸）+ 高速動態（殘影/速度線）
+          const [bx, by] = toCanvas(b.x, b.y);
+          drawSpinGlow(g, bx, by, col, Math.max(0, Math.min(1, b.spin / DEFAULT_SCALES.maxSpin)), curT);
+          drawSpeedFx(g, b.id, frames, idx, col);
+        }
         const distC = Math.hypot(b.x, b.y);
         if (b.alive && (b.z ?? 0) < 12 && distC > arena.value.radius - 26 - 8) {
           const sAng = Math.atan2(toCanvas(b.x, b.y)[1] - cy, toCanvas(b.x, b.y)[0] - cx);
@@ -1040,12 +1288,17 @@ export function useBattle(opts: UseBattleOptions = {}) {
         drawTop(g, b.x, b.y, b.z ?? 0, b.angle, col, 26, b.alive, presetOf(b.id));
       }
 
-      // 碰撞火花 + 擊破爆裂
+      // 碰撞火花 + 焊接火星 + 擊破爆裂
       drawSparks(g, curT);
+      drawEmbers(g, curT);
       drawDeaths(g, curT);
 
       // 必殺技「上層」特效：衝擊爆發環 / 分身召喚漣漪
       drawSpecialTop(g, curT, frame);
+
+      // 傷害/回血浮動數字（最上層）
+      drawDamagePops(g, curT, frames);
+      g.restore(); // 結束場地震動位移（停格 banner 不隨震動偏移）
 
       // 必殺技停格 banner：大字招式名（停格期間顯示，讓人看清是什麼招）
       if (freezeEvent.value) {

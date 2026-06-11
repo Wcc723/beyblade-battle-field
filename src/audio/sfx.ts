@@ -4,6 +4,9 @@
  *
  * 用法：使用者手勢後先 `resumeAudio()` 解除 autoplay 限制，回放時依事件呼叫 play*()。
  * 音色想微調就改各 play* 的頻率/波形/包絡。
+ *
+ * 響度安全：master gain 之後串一級 DynamicsCompressor 當 limiter——密集撞擊多層疊加時
+ * 壓住峰值不爆音（threshold -10dB / ratio 16 的硬限幅設定）。
  */
 import { ref } from "vue";
 
@@ -25,7 +28,15 @@ function ensure(): AudioContext | null {
     ctx = new AC();
     master = ctx.createGain();
     master.gain.value = sfxVolume.value;
-    master.connect(ctx.destination);
+    // limiter：master → compressor → destination（疊加爆音保險）
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -10;
+    limiter.knee.value = 4;
+    limiter.ratio.value = 16;
+    limiter.attack.value = 0.002;
+    limiter.release.value = 0.16;
+    master.connect(limiter);
+    limiter.connect(ctx.destination);
     // 0.5s 白噪緩衝（金屬撞擊／爆炸用）
     const n = Math.floor(ctx.sampleRate * 0.5);
     noiseBuf = ctx.createBuffer(1, n, ctx.sampleRate);
@@ -45,6 +56,11 @@ export function resumeAudio(): void {
 export function setSfxVolume(v: number): void {
   sfxVolume.value = Math.max(0, Math.min(1, v));
   if (master) master.gain.value = sfxVolume.value;
+}
+
+/** ±pct 隨機微偏（detune 用）：連續觸發不像機關槍。 */
+function jit(pct: number): number {
+  return 1 + (Math.random() * 2 - 1) * pct;
 }
 
 /** 單音：可選滑頻（slideTo）與延遲（delay 秒）。 */
@@ -87,12 +103,27 @@ function noise(dur: number, gain: number, filter: BiquadFilterType, freq: number
   src.stop(t + dur + 0.03);
 }
 
-/** 撞擊：金屬「鏘」——強弱依 impact（0~260+）。 */
+/**
+ * 撞擊：三層合成，impact（0~260+）映射音量/音調/明亮度——弱撞悶、強撞炸。
+ *  1) 低頻 thump：sine 短促下滑（重量感），音量與長度隨力道。
+ *  2) 金屬 clank：bandpass 白噪（中心頻率隨力道開亮）+ 方波鐘鳴（基音 + 2.76x 非諧泛音）。
+ *  3) 高頻 transient：極短 highpass「嚓」，夠猛才出現。
+ * 每層 ±5~10% detune + 0~8ms timing 隨機 → 密集撞擊不像機關槍。
+ */
 export function playCollision(impact: number): void {
   const s = Math.min(1, impact / 260);
   if (s < 0.05) return;
-  noise(0.04 + 0.06 * s, 0.22 * (0.4 + s), "bandpass", 1400 + s * 3200);
-  tone(480 + s * 1000, 0.05 + 0.07 * s, "triangle", 0.1 * (0.5 + s), 220);
+  const d = Math.random() * 0.008;
+  // 1) 低頻 thump
+  tone((85 + 75 * s) * jit(0.06), 0.08 + 0.1 * s, "sine", 0.16 + 0.3 * s, 38, d);
+  // 2) 金屬 clank：噪（亮度隨力道）
+  noise(0.045 + 0.085 * s, 0.14 + 0.24 * s, "bandpass", (850 + 2700 * s) * jit(0.08), 420 + 700 * s, d);
+  //    金屬 clank：方波鐘鳴（非諧泛音=金屬感）
+  const f0 = (300 + 460 * s) * jit(0.05);
+  tone(f0, 0.045 + 0.05 * s, "square", 0.035 + 0.07 * s, f0 * 0.55, d + 0.002);
+  tone(f0 * 2.76, 0.035 + 0.04 * s, "square", 0.02 + 0.045 * s, undefined, d + 0.002);
+  // 3) 高頻 transient click（強撞才亮）
+  if (s > 0.25) noise(0.012 + 0.012 * s, 0.08 + 0.18 * (s - 0.25), "highpass", (3600 + 3000 * s) * jit(0.1), undefined, d);
 }
 
 /** 必殺技發動：上升掃頻，依招式換基頻。 */
@@ -102,16 +133,19 @@ export function playSpecial(kind: string): void {
   tone(base * 1.5, 0.3, "sine", 0.09, base * 3);
 }
 
-/** 擊破 KO：爆炸（lowpass 往下掃的噪）+ 低頻 boom。 */
+/** 擊破 KO：起爆 transient + 爆炸噪（lowpass 下掃）+ 雙層 sub 落地 boom（深度落地感）。 */
 export function playKO(): void {
-  noise(0.5, 0.5, "lowpass", 2000, 120);
-  tone(150, 0.5, "sine", 0.32, 48);
+  noise(0.04, 0.32, "highpass", 2400); // 起爆「嚓」
+  noise(0.55, 0.5, "lowpass", 1900, 100); // 爆炸主體
+  tone(130, 0.6, "sine", 0.38, 36); // sub 落地 drop
+  tone(58, 0.55, "triangle", 0.2, 28, 0.06); // 第二層 rumble（晚 60ms 落地）
 }
 
-/** 出界：下降 whoosh。 */
+/** 出界：上揚呼嘯（陀螺飛出去）——噪音 + 音調雙層向上掃，尾端自然散掉。 */
 export function playRingOut(): void {
-  tone(760, 0.4, "sine", 0.2, 130);
-  noise(0.38, 0.13, "highpass", 700, 240);
+  noise(0.42, 0.2, "bandpass", 600, 3400);
+  tone(320, 0.45, "sine", 0.16, 1250);
+  tone(240, 0.4, "triangle", 0.09, 980, 0.04);
 }
 
 /** 停轉：轉速逐漸歸零的下滑音。 */
@@ -119,9 +153,11 @@ export function playSpinOut(): void {
   tone(440, 0.7, "triangle", 0.18, 70);
 }
 
-/** 發射：快速上揚 zip。 */
+/** 發射：卡榫 click + 拉繩 rip（上揚 saw）+ 抽繩風聲（bandpass 上掃）。 */
 export function playLaunch(): void {
-  tone(170, 0.16, "sawtooth", 0.14, 760);
+  noise(0.025, 0.16, "highpass", 2800); // 卡榫
+  tone(150 * jit(0.05), 0.2, "sawtooth", 0.15, 920); // rip 上揚
+  noise(0.16, 0.12, "bandpass", 1100, 3800, 0.01); // 抽繩風聲
 }
 
 /** 勝利：三音小喇叭。 */

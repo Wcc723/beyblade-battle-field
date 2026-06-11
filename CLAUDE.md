@@ -44,7 +44,7 @@ npm run cf-typegen # wrangler types → 重新產生 worker-configuration.d.ts�
 
 ## 前端對戰流程（`BattleViz.vue`）
 
-狀態機 `aim-A → aim-B → playing`：兩種拖曳發射模式（`flick` 甩動＝放手瞬間游標速度決定動能 / `sling` 拉弓＝拉的距離）→ 紅藍**分開依序發射** → `runServerSimulation()` 統一運算 → 回放。回放用**相鄰幀內插**（`lerpFrame`，慢動作才滑順）+ 終結慢動作（`slowmoCues`）+ 必殺技特效。多回合**先到 3 分**（`roundPoints`：擊破/出界護牆缺口 2 分、停轉 1 分；`POCKET_ANGLES` 定義高分缺口）。
+狀態機 `aim-A → aim-B → playing`：兩種拖曳發射模式（`flick` 甩動＝放手瞬間游標速度決定動能 / `sling` 拉弓＝拉的距離）→ 紅藍**分開依序發射** → `runServerSimulation()` 統一運算 → 回放。回放用**相鄰幀內插**（`lerpFrame`，慢動作才滑順）+ 終結慢動作（`slowmoCues`）+ 必殺技特效 + 傷害數字/場地震動/火星（吃 `collisionEvents` 的 `dmgA/dmgB`，全由播放時間推導、scrub 倒帶可重現）。多回合**先到 3 分**（`roundPoints` 新制：**擊破/停轉/timeout 有勝者＝1 分、出界一律 2 分、平手 0 分**——`cornerScore`/rim 分區已不參與計分，ArenaSvg 出界標籤固定 2×）。**同步死亡 tie-break**：同一步同類雙亡不再平手，比「超殺深度」（`hpAtDeath/maxHp` 較不負者勝；雙停轉比剩餘血量），±10% 傷害浮動讓平手趨近 0（全局 ~0.1%）；混合同步死亡（一 ko 一出界等）維持平手。
 
 ## 設定與後台（localStorage）
 
@@ -85,16 +85,33 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 
 ## 必殺技
 
-兩招、opt-in（每顆獨立裝備）、seeded 機率觸發、**不影響基礎平衡**（平衡工具不裝必殺技）：
+五招、opt-in（每顆獨立裝備）、seeded 機率觸發、**不影響基礎平衡**（平衡工具不裝必殺技）；設計上**裝技明顯強於不裝**（刻意，鏡像實測 dash ~74%/rush ~71% 勝率）：
 
 - **rush（衝刺突進）**：逼近對手時機率爆發加速 + 直接扣血。
 - **blast（衝擊）**：打出夠猛的一擊時機率把對手彈開 + 扣血（可順勢擊出界）。
+- **dash（高速移動）**：低轉速觸發加速 + 回轉，**並回血 10% maxHp**（`dashHealFrac`，事件帶 `heal` 欄位供前端彈綠字）。
+- **vortex（旋渦）**／**clone（分身）**：吸附扣轉／分身衝撞（次數多、單發傷害低）。
 
-所有數值集中在 `engine.ts` 的 `DEFAULT_SPECIAL`，每招獨立觸發機率（`rushChance` / `blastChance`）。
+所有數值集中在 `engine.ts` 的 `DEFAULT_SPECIAL`，每招獨立觸發機率；**`graceTime`（預設 3s）＝開場緩衝，所有必殺在 t < graceTime 一律不觸發**（resolveCollisions 的 blast 與 applySpecials 各有一道閘門）。
 
 ## 平衡（很重要）
 
-**平衡是「場地 × 屬性」共同決定的**——同一組陀螺換個場地勝率天差地遠。靠時間/停轉決勝 → 續航為王；靠碰撞/出界決勝 → 攻防/重量才有用。現行預設已校到接近**猜拳**（攻擊剋持久、持久剋防禦、防禦剋攻擊），四類型勝率約 46~55%。**動到 `STAT_PRESETS`、`DEFAULT_ARENA`、`HP_BASE`、`DEFAULT_SPECIAL` 後一定要 `npm run balance` 驗證。** 工具在 `test/balance.bench.ts`（用 `vitest.balance.config.ts`，不混進一般 `npm test`）。
+**平衡是「場地 × 屬性」共同決定的**——同一組陀螺換個場地勝率天差地遠。靠時間/停轉決勝 → 續航為王；靠碰撞/出界決勝 → 攻防/重量才有用。**動到 `STAT_PRESETS`、`DEFAULT_ARENA`、`HP_BASE`、`DEFAULT_SPECIAL` 後一定要 `npm run balance` 驗證。** 工具在 `test/balance.bench.ts`（用 `vitest.balance.config.ts`，不混進一般 `npm test`）。
+
+現行校準（2026-06 第二輪定案）：勝負原因 **ko ~61% / spin-out ~27% / ring-out ~12% / draw ~0.1%**；四類型勝率 45~55（attack 48.8 / defense 53.1 / stamina 48.1 / balance 50.0）；猜拳三角 def>atk 67、sta>def 68、atk>sta 62。注意事項：
+
+- 碰撞傷害有 **±10% seeded 浮動**（dmgA/dmgB 獨立擲骰）——這是「平手趨近零」的另一半（tie-break 是前一半）。
+- **`defense.attack` 是刀口參數**：atk-def 對局對它極度敏感（0.50~0.58 之間勝率可從 13% 擺到 89%），動它必重跑 balance。
+- 各勝負原因比例在不同 seed 有 ±1.5pp 取樣噪音，勿對單一 seed 過度擬合。
+- **D1 `global_config` 會蓋過程式碼預設**：重校後要同步線上值（migration 0004 清除舊 blob 回落新預設；之後再重校記得比照處理）。`defaultConfigValue` 的 arena `activeId` 預設必須是 `builtin-xtreme`（清 blob 後若回落圓形場＝正式站默默換場）。
+
+## UI 風格（BURST FORGE 金屬鍛造）
+
+- 設計系統在 `src/styles/forge.css`：tokens 沿用舊變數名（`--accent` 琥珀 #ffb31f、`--lava`、`--red` #e8442e、`--blue` #2e9fe8、`--ok`）+ 共用 class（`.plate` 切角金屬面板／`.f-btn` 機台鍵／`.f-input`／`.f-select`／`.f-badge`／`.seg`／`.hazard`／`.f-label`）。字型 Big Shoulders Display + Noto Sans TC（index.html 載入）。
+- **全站渲染字串零 emoji**；圖示一律 `src/components/ui/BbIcon.vue`（30 個 inline SVG，name+size props）——新增 UI 請沿用，缺圖示就加進 BbIcon 的 ICONS map，不要回頭用 emoji。
+- **`.plate`/`.f-btn` 雷**：clip-path 會吃掉 box-shadow → 外陰影/鍵帽厚度一律走 `filter: drop-shadow()`。
+- 行動版：底部 Tab Bar 只有大廳/個人設定（room/test 路由隱藏）；測試頁與後台入口**僅 admin 渲染**。
+- 中二名稱系統 `src/game/names.ts`（零 Env，worker 與前端共用）：`autoNickname(uid)` 自動暱稱（API 讀設定時補上並持久化）、`beybladeName(uid, type)` 陀螺名（穩定 hash、不存 DB、兩端一致）。
 
 ## 容易踩的雷
 

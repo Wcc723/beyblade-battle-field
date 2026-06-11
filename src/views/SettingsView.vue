@@ -134,6 +134,7 @@ async function save() {
           <span class="row-label">暱稱（對戰顯示用）</span>
           <input v-model="form.nickname" maxlength="20" placeholder="輸入暱稱" class="f-input" />
         </label>
+        <p class="hint">未改名前使用系統指派的代號，隨時可以改成自己的名字。</p>
 
         <div class="f-label sect"><BbIcon name="lightning" :size="13" />預設陀螺配置（進房自動套用）</div>
         <div class="grid2">

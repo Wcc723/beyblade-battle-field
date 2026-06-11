@@ -271,6 +271,8 @@ export interface SpecialEvent {
   /** 發動位置（世界座標），供停格特效定位 */
   x: number;
   y: number;
+  /** dash 回血量（實際回復值，夾制後；僅 dash 事件帶）。可選 */
+  heal?: number;
 }
 
 /** 碰撞事件（供回放火花特效用，強度依 impact） */
@@ -281,6 +283,14 @@ export interface CollisionEvent {
   y: number;
   /** 撞擊強度（沿法線接近速度）→ 決定火花強弱 */
   impact: number;
+  /** 事件中第一顆陀螺 id（可選，向後相容舊回放資料） */
+  aId?: string;
+  /** 事件中第二顆陀螺 id（可選） */
+  bId?: string;
+  /** A 實際扣血量（含 ±10% 浮動後的最終值）。可選 */
+  dmgA?: number;
+  /** B 實際扣血量（含 ±10% 浮動後的最終值）。可選 */
+  dmgB?: number;
 }
 
 /** 淘汰事件（供回放擊破/出界特效用） */
@@ -294,6 +304,8 @@ export interface DeathEvent {
 
 /** 必殺技數值（集中可調，每招獨立設定）。觸發模型＝冷卻 + 每回合限次 + 機率。 */
 export interface SpecialConfig {
+  /** 開場緩衝（秒）：t 小於此值時所有必殺技一律不得觸發（統一閘門） */
+  graceTime: number;
   /** 衝刺：觸發機率 0~1 */
   rushChance: number;
   /** 衝刺：進入此距離才可能觸發 */
@@ -333,6 +345,8 @@ export interface SpecialConfig {
   dashAccel: number;
   /** 加速期間速度上限 = maxSpeed × 此倍率（夾住 → 不會把自己噴出界） */
   dashMaxSpeedMul: number;
+  /** 觸發時回復血量 = maxHp × 此比例（夾制不超過 maxHp） */
+  dashHealFrac: number;
 
   /* —— 旋渦 vortex：對手進範圍觸發 → 持續數秒把對手往自己拉 + 抽乾對手自旋（重型/防禦磨人） —— */
   vortexChance: number;

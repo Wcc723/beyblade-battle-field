@@ -39,6 +39,8 @@ it("balance", () => {
   // h2h[x][y] = x 對 y 的勝率（side-averaged）
   const h2h: Record<string, Record<string, number>> = {};
   for (const x of TYPES) h2h[x] = {};
+  // 每組對局的勝負原因分解（診斷用：看「哪種對局靠什麼分勝負」）
+  const pairReasons: Array<{ pair: string; r: Record<string, number>; n: number }> = [];
 
   for (let i = 0; i < TYPES.length; i++) {
     for (let j = i; j < TYPES.length; j++) {
@@ -46,10 +48,12 @@ it("balance", () => {
       const y = TYPES[j];
       let xWins = 0;
       let games = 0;
+      const pr: Record<string, number> = { "ring-out": 0, "spin-out": 0, timeout: 0, draw: 0, ko: 0 };
       // x 當紅、y 當藍
       for (let k = 0; k < N; k++) {
         const r = match(x, y, DEFAULT_ARENA, rng);
         reasons[r.reason]++;
+        pr[r.reason]++;
         if (r.winnerId === "R") xWins++;
         if (r.winnerId) games++;
       }
@@ -57,9 +61,11 @@ it("balance", () => {
       for (let k = 0; k < N; k++) {
         const r = match(y, x, DEFAULT_ARENA, rng);
         reasons[r.reason]++;
+        pr[r.reason]++;
         if (r.winnerId === "B") xWins++;
         if (r.winnerId) games++;
       }
+      pairReasons.push({ pair: `${x} vs ${y}`, r: pr, n: N * 2 });
       const xRate = games ? (xWins / games) * 100 : 50;
       h2h[x][y] = xRate;
       if (x !== y) h2h[y][x] = 100 - xRate;
@@ -84,5 +90,13 @@ it("balance", () => {
   console.log("          " + TYPES.map((t) => t.padStart(9)).join(""));
   for (const x of TYPES) {
     console.log(x.padEnd(9) + TYPES.map((y) => (x === y ? "    —" : h2h[x][y].toFixed(0) + "%").padStart(9)).join(""));
+  }
+
+  console.log("\n=== 每組對局勝負原因（%）===");
+  for (const { pair, r, n } of pairReasons) {
+    const parts = ["ko", "spin-out", "ring-out", "timeout", "draw"]
+      .map((k) => `${k} ${((r[k] / n) * 100).toFixed(0)}%`)
+      .join("  ");
+    console.log(`  ${pair.padEnd(22)} ${parts}`);
   }
 });

@@ -35,6 +35,7 @@ import {
   type ServerMsg,
   type Side,
 } from "../src/game/room";
+import { autoNickname } from "../src/game/names";
 import { readGameConfig, type GameConfig } from "./api";
 
 const AIM_MS = 45_000; // 瞄準時限（到點自動以預設參數發射）
@@ -171,12 +172,14 @@ export class BattleRoomDO extends DurableObject<Env> {
       }
     }
 
+    // 暱稱保險：上游取到空值（user_settings 空白等）→ fallback 系統代號（只顯示用，不寫 DB）
+    const nickname = (user.nickname ?? "").trim() || autoNickname(user.uid);
     const existing = room.players[side];
     room.players[side] = existing?.uid === user.uid
-      ? { ...existing, nickname: user.nickname, picture: user.picture } // 重連：保留本局 loadout
+      ? { ...existing, nickname, picture: user.picture } // 重連：保留本局 loadout
       : {
           uid: user.uid,
-          nickname: user.nickname,
+          nickname,
           picture: user.picture,
           // 旋向固定：先手 A 右旋、後手 B 左旋（個人設定的預設旋向在線上無效）
           loadout: { ...user.loadout, spinDir: sideSpinDir(side) },

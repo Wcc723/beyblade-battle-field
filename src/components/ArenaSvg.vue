@@ -206,7 +206,7 @@ const boxG = computed(() => {
         font-size="18"
         font-weight="700"
         font-family="'Big Shoulders Display', 'Noto Sans TC', sans-serif"
-      >{{ l.score }}×</text>
+      >2×</text><!-- 計分新制：出界一律 2 分（cornerScore 不再參與計分） -->
     </g>
 
     <!-- 圓形場 -->
@@ -262,7 +262,7 @@ const boxG = computed(() => {
           font-size="18"
           font-weight="700"
           font-family="'Big Shoulders Display', 'Noto Sans TC', sans-serif"
-        >{{ e.score }}×</text>
+        >2×</text>
       </g>
     </g>
   </svg>
