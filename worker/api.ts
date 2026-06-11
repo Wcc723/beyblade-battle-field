@@ -13,6 +13,7 @@
  * 單一真相在 code，管理員第一次儲存才寫進 D1）。
  */
 import type { SessionData } from "./session";
+import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../src/physics/types";
 import { DEFAULT_ARENA, XTREME_STADIUM, DEFAULT_SPECIAL } from "../src/physics/engine";
 import { STAT_PRESETS } from "../src/physics/presets";
 
@@ -47,6 +48,32 @@ async function readConfig(env: Env, key: ConfigKey): Promise<unknown> {
   } catch {
     return defaultConfigValue(key);
   }
+}
+
+/** Battle Room DO 用：取「目前線上對戰生效」的整組設定（active 場地 + 屬性 + 必殺技）。 */
+export interface GameConfig {
+  arena: ArenaConfig;
+  arenaName: string;
+  stats: Record<string, BeybladeStats>;
+  special: SpecialConfig;
+}
+
+export async function readGameConfig(env: Env): Promise<GameConfig> {
+  const [arenaVal, stats, special] = await Promise.all([
+    readConfig(env, "arena") as Promise<{ presets: { id: string; name: string; config: ArenaConfig }[]; activeId: string }>,
+    readConfig(env, "stats") as Promise<Record<string, BeybladeStats>>,
+    readConfig(env, "special") as Promise<SpecialConfig>,
+  ]);
+  const preset = arenaVal.presets.find((p) => p.id === arenaVal.activeId) ?? arenaVal.presets[0];
+  // stats / special 鋪程式碼預設底（D1 blob 缺欄位不會讓模擬吃到 undefined）
+  const mergedStats: Record<string, BeybladeStats> = {};
+  for (const [k, v] of Object.entries(STAT_PRESETS)) mergedStats[k] = { ...v, ...(stats[k] ?? {}) };
+  return {
+    arena: { ...preset.config },
+    arenaName: preset.name,
+    stats: mergedStats,
+    special: { ...DEFAULT_SPECIAL, ...special },
+  };
 }
 
 export async function handleGetConfig(env: Env): Promise<Response> {

@@ -5,6 +5,7 @@ import { useRouter } from "vue-router";
 const router = useRouter();
 const roomCode = ref("");
 const codeError = ref("");
+const creating = ref(false);
 
 function joinByCode() {
   const code = roomCode.value.trim().toUpperCase();
@@ -16,6 +17,21 @@ function joinByCode() {
   codeError.value = "";
   // 具名路由 + params → 自動 URL 編碼，不會拼出壞路徑
   router.push({ name: "room", params: { code } });
+}
+
+async function createRoom(bot = false) {
+  creating.value = true;
+  codeError.value = "";
+  try {
+    const res = await fetch("/api/room/create", { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { code } = (await res.json()) as { code: string };
+    router.push({ name: "room", params: { code }, query: bot ? { bot: "1" } : undefined });
+  } catch {
+    codeError.value = "開房失敗，請再試一次";
+  } finally {
+    creating.value = false;
+  }
 }
 </script>
 
@@ -35,8 +51,11 @@ function joinByCode() {
       </div>
       <p v-if="codeError" class="error">{{ codeError }}</p>
       <div class="actions">
-        <button class="primary" disabled>⚡ 快速配對（即將推出）</button>
-        <button disabled>➕ 開新房間（即將推出）</button>
+        <button class="primary" :disabled="creating" @click="createRoom(false)">
+          {{ creating ? "開房中…" : "➕ 開新房間" }}
+        </button>
+        <button class="bot" :disabled="creating" @click="createRoom(true)">🤖 跟 BOT 對戰</button>
+        <button disabled>⚡ 快速配對（即將推出）</button>
       </div>
     </section>
     <section class="card">
@@ -114,5 +133,12 @@ function joinByCode() {
   background: var(--accent);
   color: #1a1207;
   border-color: var(--accent);
+}
+.actions .bot {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.actions .bot:disabled {
+  opacity: 0.45;
 }
 </style>

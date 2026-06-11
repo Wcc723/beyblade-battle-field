@@ -1,11 +1,21 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { simulate, DEFAULT_SCALES, maxHpFor } from "../physics/engine";
-import type { ArenaConfig, BeybladeInit, Frame, SimResult, SpecialKind, SpecialEvent } from "../physics/types";
+import type {
+  ArenaConfig,
+  BeybladeInit,
+  BeybladeStats,
+  Frame,
+  SimResult,
+  SpecialConfig,
+  SpecialKind,
+  SpecialEvent,
+} from "../physics/types";
 import { STAT_PRESETS, PRESET_LABELS } from "../physics/presets";
 import { getActiveConfig, activePresetName, presets, activeId, setActive } from "../store/arenaStore";
-import { rimScoreAt } from "../physics/arena";
 import { getStats } from "../store/statStore";
 import { special } from "../store/specialStore";
+import { WIN_SCORE, roundPoints as sharedRoundPoints } from "../game/scoring";
+import type { AimInput } from "../game/room";
 import {
   sfxEnabled,
   resumeAudio,
@@ -28,6 +38,11 @@ import {
 export interface UseBattleOptions {
   /** 預設發射方式（手機版用「拉弓」較好控制；桌面慣用「甩動」）。 */
   defaultLaunchMode?: "flick" | "sling";
+  /**
+   * 線上模式攔截點：自己瞄準放手時呼叫。回傳 true = 已處理（送往伺服器），
+   * composable 不跑本機「換邊瞄準/本機模擬」流程。不傳 = 原本單機行為。
+   */
+  onLaunchSubmit?: (aim: AimInput, init: BeybladeInit) => boolean;
 }
 
 export function useBattle(opts: UseBattleOptions = {}) {
@@ -60,8 +75,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     return "⚔️ 對戰回放";
   });
 
-  /* ---------- 計分賽制（先到 N 分）---------- */
-  const WIN_SCORE = 3;
+  /* ---------- 計分賽制（先到 N 分，WIN_SCORE 在 src/game/scoring.ts）---------- */
   const scoreA = ref(0);
   const scoreB = ref(0);
   const roundNum = ref(1);
@@ -69,17 +83,9 @@ export function useBattle(opts: UseBattleOptions = {}) {
   const lastRoundPoints = ref(0);
   const matchOver = computed(() => scoreA.value >= WIN_SCORE || scoreB.value >= WIN_SCORE);
 
-  // 出界計分依場地「邊緣分區」資料（rimScoreAt）：落在高分區/破口的角度 = 該段 score
+  // 出界計分依場地「邊緣分區」資料：邏輯抽到 src/game/scoring.ts（與 Battle Room DO 共用）
   function roundPoints(r: SimResult): number {
-    if (!r.winnerId) return 0;
-    if (r.reason === "ko") return 2;
-    if (r.reason === "ring-out") {
-      // 方形場：四角出界統一用 box.cornerScore；圓形場：依 rim 落點分區
-      if (arena.value.box) return arena.value.box.cornerScore ?? 2;
-      return rimScoreAt(arena.value, r.ringOutAngle);
-    }
-    if (r.reason === "spin-out" || r.reason === "timeout") return 1;
-    return 0;
+    return sharedRoundPoints(arena.value, r);
   }
   function awardRound() {
     if (roundScored.value) return;
@@ -94,6 +100,16 @@ export function useBattle(opts: UseBattleOptions = {}) {
     if (r.winnerId === "A") scoreA.value += pts;
     else scoreB.value += pts;
   }
+
+  /* ---------- 線上模式注入點 ---------- */
+  // 屬性覆寫：線上對戰用伺服器（D1 全域）的 stats，不吃本機 localStorage；null = 本機行為
+  const statsOverride = ref<Record<string, BeybladeStats> | null>(null);
+  function statsFor(preset: string): BeybladeStats {
+    const o = statsOverride.value?.[preset];
+    return o ? { ...o } : getStats(preset);
+  }
+  // 必殺技數值來源：預設＝localStorage store（reactive，後台改動即時生效）；線上換成伺服器那份
+  const specialCfg = ref<SpecialConfig>(special);
 
   /* ---------- 回放 ---------- */
   const result = ref<SimResult | null>(null);
@@ -207,12 +223,12 @@ export function useBattle(opts: UseBattleOptions = {}) {
   function onPointerUp() {
     if (!dragging.value) return;
     dragging.value = false;
-    const init = launchMode.value === "sling" ? buildLaunchFromSling() : buildLaunchFromFlick();
-    if (!init) {
+    const built = launchMode.value === "sling" ? buildLaunchFromSling() : buildLaunchFromFlick();
+    if (!built) {
       draw(); // 力道太小，忽略，維持瞄準
       return;
     }
-    submitLaunch(init);
+    submitLaunch(built.init, built.aim);
   }
 
   /* --- 甩動：放手瞬間速度（取最近 ~80ms 樣本）--- */
@@ -246,23 +262,27 @@ export function useBattle(opts: UseBattleOptions = {}) {
     return Math.min(1, dist / (arena.value.radius * 0.8));
   }
 
-  function makeInit(dirx: number, diry: number, power: number): BeybladeInit {
+  function makeInit(dirx: number, diry: number, power: number): { init: BeybladeInit; aim: AimInput } {
     const setup = phase.value === "aim-A" ? setupA : setupB;
     const speed = power * DEFAULT_SCALES.maxSpeed;
     const spin = (0.55 + 0.45 * power) * DEFAULT_SCALES.maxSpin;
     return {
-      id: setup.id,
-      color: setup.color,
-      stats: getStats(setup.preset),
-      position: { x: dragStart.x, y: dragStart.y },
-      velocity: { x: dirx * speed, y: diry * speed },
-      spin,
-      radius: 26,
-      spinDir: setup.spinDir,
-      special: setup.special || undefined,
+      init: {
+        id: setup.id,
+        color: setup.color,
+        stats: statsFor(setup.preset),
+        position: { x: dragStart.x, y: dragStart.y },
+        velocity: { x: dirx * speed, y: diry * speed },
+        spin,
+        radius: 26,
+        spinDir: setup.spinDir,
+        special: setup.special || undefined,
+      },
+      // 線上模式只送「瞄準輸入」：stats/special 由伺服器依 loadout 組裝（防竄改）
+      aim: { x: dragStart.x, y: dragStart.y, dirX: dirx, dirY: diry, power },
     };
   }
-  function buildLaunchFromSling(): BeybladeInit | null {
+  function buildLaunchFromSling(): { init: BeybladeInit; aim: AimInput } | null {
     const pullx = dragStart.x - dragCurrent.x;
     const pully = dragStart.y - dragCurrent.y;
     const dist = Math.hypot(pullx, pully);
@@ -270,7 +290,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     if (power < 0.06 || dist < 1e-3) return null;
     return makeInit(pullx / dist, pully / dist, power);
   }
-  function buildLaunchFromFlick(): BeybladeInit | null {
+  function buildLaunchFromFlick(): { init: BeybladeInit; aim: AimInput } | null {
     const v = flickWorldVel();
     const power = Math.min(1, v.speed / V_FULL);
     if (power < 0.06 || v.speed < 1e-3) return null;
@@ -279,8 +299,11 @@ export function useBattle(opts: UseBattleOptions = {}) {
   }
 
   /* ---------- 流程：分開發射 → 伺服器統一運算 ---------- */
-  function submitLaunch(init: BeybladeInit) {
+  function submitLaunch(init: BeybladeInit, aim?: AimInput) {
     resumeAudio(); // 發射是使用者手勢 → 解除 autoplay 限制
+    // 線上模式：交給外部（送伺服器），不跑本機換邊/模擬；
+    // 發射音效由外部在「真正送出」時播（斷線被丟棄時不播，不誤導）
+    if (aim && opts.onLaunchSubmit?.(aim, init)) return;
     playLaunch();
     if (phase.value === "aim-A") {
       launchA.value = init;
@@ -306,8 +329,38 @@ export function useBattle(opts: UseBattleOptions = {}) {
       seed: roundNum.value, // 每回合不同 seed（仍確定性）
       sampleEvery: 1,
       followThroughTime: 2.5, // 勝負底定後再演 2.5 秒（出界陀螺飛出、勝方續轉）
-      special: { ...special }, // 必殺技數值（陀螺後台可調）
+      special: { ...specialCfg.value }, // 必殺技數值（陀螺後台可調）
     });
+    playhead.value = 0;
+    resetFreeze();
+    phase.value = "playing";
+    play();
+  }
+
+  /**
+   * 線上模式回放：DO 廣播「重跑包」（inits + seed + config，~2KB），
+   * 兩端用同一份確定性引擎重算出一模一樣的 frames → 不用傳 1.5MB 軌跡。
+   * 勝負/計分以伺服器 outcome 為準（本機 awardRound 由 roundScored=true 關閉）。
+   */
+  function playRemoteRound(p: {
+    inits: BeybladeInit[];
+    seed: number;
+    arena: ArenaConfig;
+    special: SpecialConfig;
+    maxTime?: number;
+    followThroughTime?: number;
+  }) {
+    arena.value = { ...p.arena };
+    result.value = simulate(p.inits, {
+      dt: 1 / 60,
+      maxTime: p.maxTime ?? maxTime,
+      arena: { ...p.arena },
+      seed: p.seed,
+      sampleEvery: 1,
+      followThroughTime: p.followThroughTime ?? 2.5,
+      special: { ...p.special },
+    });
+    roundScored.value = true; // 線上：計分權威在伺服器，關掉本機 awardRound
     playhead.value = 0;
     resetFreeze();
     phase.value = "playing";
@@ -744,9 +797,9 @@ export function useBattle(opts: UseBattleOptions = {}) {
 
   /* ---------- 必殺技動畫特效（純由 curT 推導 → 重播/變速/scrub 穩、確定性） ---------- */
   function specialDuration(kind: SpecialKind): number {
-    if (kind === "vortex") return special.vortexDuration;
-    if (kind === "dash") return special.dashDuration;
-    if (kind === "clone") return special.cloneDuration;
+    if (kind === "vortex") return specialCfg.value.vortexDuration;
+    if (kind === "dash") return specialCfg.value.dashDuration;
+    if (kind === "clone") return specialCfg.value.cloneDuration;
     return 0.45;
   }
   /** 由最近幾幀位移推導移動方向（canvas 空間，已 y 翻轉）。 */
@@ -764,7 +817,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
   function drawVortexFx(g: CanvasRenderingContext2D, cx: number, cy: number, curT: number, age: number, dur: number) {
     const fade = Math.min(1, age / 0.2) * Math.min(1, (dur - age) / 0.3);
     if (fade <= 0) return;
-    const R = scaleLen(special.vortexRange) * 0.5;
+    const R = scaleLen(specialCfg.value.vortexRange) * 0.5;
     const spin = curT * 5.5;
     g.save();
     g.translate(cx, cy);
@@ -1102,7 +1155,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     const f = frameAt();
     const b = f?.bodies.find((x) => x.id === id);
     if (!b) return 0;
-    const maxHp = maxHpFor(getStats(id === "A" ? setupA.preset : setupB.preset), arena.value.hpBase);
+    const maxHp = maxHpFor(statsFor(id === "A" ? setupA.preset : setupB.preset), arena.value.hpBase);
     return Math.max(0, Math.min(100, (b.hp / maxHp) * 100));
   }
   const teamIds = ["A", "B"];
@@ -1133,7 +1186,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
 
   /** 必殺技觸發說明（讀陀螺後台目前數值）：條件 · 機率 · 冷卻 · 每回合次數。 */
   function specialInfo(kind: "" | SpecialKind): string {
-    const s = special;
+    const s = specialCfg.value;
     const pct = (c: number) => Math.round(c * 100);
     switch (kind) {
       case "rush":
@@ -1229,6 +1282,10 @@ export function useBattle(opts: UseBattleOptions = {}) {
     startRound,
     nextRound,
     resetMatch,
+    // 線上模式注入點
+    statsOverride,
+    specialCfg,
+    playRemoteRound,
     // 畫布 / 拖曳
     canvas,
     SIZE,

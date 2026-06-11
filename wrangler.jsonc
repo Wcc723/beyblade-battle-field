@@ -30,8 +30,20 @@
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BATTLE_ROOM",
+        "class_name": "BattleRoomDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BattleRoomDO"]
+    }
   ]
-  // 之後階段陸續加入：
-  // Phase 4: Battle Room Durable Object
-  // Phase 5: Lobby Durable Object
+  // 之後階段：Phase 5 Lobby Durable Object
 }
