@@ -94,8 +94,8 @@ export function activePresetName(): string {
   return getActivePreset()?.name ?? "預設場地";
 }
 
-/** 內建示範場登錄表（程式碼為來源）。 */
-const BUILTINS: { name: string; config: ArenaConfig }[] = [
+/** 內建示範場登錄表（程式碼為來源）。exported：遠端後台的「還原原廠」也用它。 */
+export const BUILTINS: { name: string; config: ArenaConfig }[] = [
   { name: "Beyblade X · Xtreme Stadium", config: XTREME_STADIUM },
 ];
 

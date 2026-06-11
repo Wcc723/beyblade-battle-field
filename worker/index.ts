@@ -12,6 +12,7 @@
  */
 import { handleLogin, handleCallback, handleLogout, isAdminEmail } from "./auth";
 import { getSession } from "./session";
+import { handleGetConfig, handlePutAdminConfig, handleGetSettings, handlePutSettings } from "./api";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -47,12 +48,24 @@ export default {
       });
     }
 
+    // --- 全域遊戲設定（登入即可讀）/ 個人設定 ---
+    if (path === "/api/config" || path === "/api/settings") {
+      const session = await getSession(request, env.SESSION_SECRET);
+      if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
+      if (path === "/api/config" && request.method === "GET") return handleGetConfig(env);
+      if (path === "/api/settings" && request.method === "GET") return handleGetSettings(env, session);
+      if (path === "/api/settings" && request.method === "PUT") return handlePutSettings(request, env, session);
+      return Response.json({ error: "method_not_allowed" }, { status: 405 });
+    }
+
     // --- 管理員區（真閘門在這裡，前端隱藏入口只是 UX）---
     if (path.startsWith("/api/admin/")) {
       const session = await getSession(request, env.SESSION_SECRET);
       if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
       if (!isAdminEmail(session.email, env)) return Response.json({ error: "forbidden" }, { status: 403 });
       if (path === "/api/admin/ping") return Response.json({ ok: true, admin: session.email });
+      const configKey = path.match(/^\/api\/admin\/config\/([a-z]+)$/)?.[1];
+      if (configKey && request.method === "PUT") return handlePutAdminConfig(request, env, configKey);
       return Response.json({ error: "not_found" }, { status: 404 });
     }
 

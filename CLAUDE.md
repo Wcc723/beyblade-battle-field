@@ -61,7 +61,9 @@ npm run cf-typegen # wrangler types → 重新產生 worker-configuration.d.ts�
 
 Cloudflare 端：`worker/index.ts`（入口，`/api/*` 走 `run_worker_first`）+ `wrangler.jsonc`（SPA fallback）。規格細節（已拍板）：大廳＝房號+快速配對+公開房列表；全站 Google OAuth（`ADMIN_EMAILS` env var 管後台權限）；場地用管理員啟用的全域組、玩家各自選陀螺；線上設定存 D1、房間暫態在 Battle Room DO；seed 由 DO 在雙方提交後產生（防離線暴搜）；R2 第一階段不用。
 
-分階段：✅P1 骨架（router+worker+vite-plugin）→ ✅P2 OAuth+權限（`worker/auth.ts`+`session.ts`+`jwt.ts`、D1 `users`、`/api/me`、router 守衛；環境變數走 `.env`，見 `.env.example`）→ P3 個人設定+後台搬 D1 → P4 Battle Room DO+對戰廳（以 `MobileBattle.vue` 為基底）→ P5 大廳 DO+戰績。
+分階段：✅P1 骨架（router+worker+vite-plugin）→ ✅P2 OAuth+權限（`worker/auth.ts`+`session.ts`+`jwt.ts`、D1 `users`、`/api/me`、router 守衛；環境變數走 `.env`，見 `.env.example`）→ ✅P3 個人設定+後台搬 D1（`worker/api.ts`：`/api/config`、`/api/admin/config/:key`、`/api/settings`；D1 `global_config` key-value JSON blob + `user_settings`；`src/store/adminBackend.ts` 後台雙資料源——兩個 Admin 元件 props 注入，後台頁「🌐 線上(D1) / 💻 本機(localStorage)」切換，測試頁仍吃 localStorage）→ P4 Battle Room DO+對戰廳（以 `MobileBattle.vue` 為基底）→ P5 大廳 DO+戰績。
+
+P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queue 依序送出**（並行 PUT 亂序會舊蓋新）、寫失敗自動 `reload()` 重新同步（樂觀更新不留分歧）、tuning 的 600ms debounce 有 `flush()`（view 卸載/pagehide 時送出，fetch `keepalive`）。遠端 stats 載入要鋪 `STAT_PRESETS` 底再蓋 D1 值（同「可選欄位+合併預設」慣例，否則 D1 blob 缺欄位會 render crash）。`npm run db:migrate` 不要在 dev server 跑著時執行（兩個 miniflare 開同一 SQLite，WAL 不同步）。
 
 線上化雷區：worker 端被單元測試 import 的模組（`session.ts`/`jwt.ts`）必須**零 `Env` 全域型別相依**（root tsconfig 沒有 workers runtime 型別）；OAuth callback 是整頁導航，**失敗一律 302 回 `/login?error=<code>`** 不可回裸 JSON；JWT/任何 base64 的 UTF-8 內容不能 `JSON.parse(atob(...))`（中文會亂碼）。
 

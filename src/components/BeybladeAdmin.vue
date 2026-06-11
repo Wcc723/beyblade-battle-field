@@ -1,8 +1,19 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { BeybladeStats, SpecialConfig } from "../physics/types";
 import { PRESET_LABELS } from "../physics/presets";
-import { stats, persistStats, resetStat, resetAllStats } from "../store/statStore";
-import { special, persistSpecial, resetSpecial } from "../store/specialStore";
+import { localTuningApi, type TuningStoreApi } from "../store/adminBackend";
+
+// 資料源注入：不傳 = localStorage（測試頁用那份）；/admin/* 會傳 D1 遠端版
+const props = withDefaults(defineProps<{ tuning?: TuningStoreApi; showGoBattle?: boolean }>(), {
+  tuning: undefined,
+  showGoBattle: true, // 線上(D1)模式會關掉：測試頁吃的是本機數值
+});
+const tuning = props.tuning ?? localTuningApi;
+const { stats, special, ready, error } = tuning;
+const resetStat = tuning.resetStat.bind(tuning);
+const resetAllStats = tuning.resetAllStats.bind(tuning);
+const resetSpecial = tuning.resetSpecial.bind(tuning);
 
 defineEmits<{ (e: "go-battle"): void }>();
 
@@ -53,7 +64,7 @@ const CLONE_FIELDS: SpField[] = [
   { key: "cloneHoming", label: "追擊強度", min: 0, max: 600, step: 20 },
 ];
 function onSpecial() {
-  persistSpecial();
+  tuning.persistSpecial();
 }
 
 const STAT_FIELDS: { key: keyof BeybladeStats; label: string; hint: string }[] = [
@@ -69,18 +80,24 @@ const TYPE_COLORS: Record<string, string> = {
   stamina: "#6ad08a",
   balance: "#ffd166",
 };
-const typeKeys = Object.keys(stats);
+// computed：遠端模式下 stats 是非同步載入，keys 會晚到
+const typeKeys = computed(() => Object.keys(stats));
 
 function onInput() {
-  persistStats();
+  tuning.persistStats();
 }
 </script>
 
 <template>
-  <div class="stats-admin">
+  <div v-if="error" class="store-error">
+    ⚠️ {{ error }}
+    <button v-if="tuning.reload" class="retry" @click="tuning.reload()">重試</button>
+  </div>
+  <div v-if="!ready && !error" class="store-loading">載入線上設定中…</div>
+  <div v-else-if="ready" class="stats-admin">
     <div class="head">
       <p class="intro">
-        編輯四種陀螺的 攻 / 防 / 續 / 重（即時存入 localStorage，下一場對戰生效）。
+        編輯四種陀螺的 攻 / 防 / 續 / 重（改動即時儲存）。
         現行預設已校過平衡：攻擊剋持久、持久剋防禦、防禦剋攻擊。改動會打破此平衡，請搭配
         <code>npm run balance</code> 驗證。
       </p>
@@ -182,11 +199,45 @@ function onInput() {
       </div>
     </div>
 
-    <button class="go" @click="$emit('go-battle')">→ 回對戰場試打</button>
+    <button v-if="props.showGoBattle" class="go" @click="$emit('go-battle')">→ 回對戰場試打</button>
+    <p v-else class="online-note">測試頁（🧪 / 📱）吃的是「本機測試」那份數值，這裡改的是線上對戰用的全域數值。</p>
   </div>
 </template>
 
 <style scoped>
+.store-error {
+  background: rgba(255, 93, 93, 0.08);
+  border: 1px solid rgba(255, 93, 93, 0.35);
+  color: var(--red);
+  border-radius: 9px;
+  padding: 9px 13px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.store-error .retry {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.online-note {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 14px 0 0;
+}
+.store-loading {
+  color: var(--muted);
+  font-size: 14px;
+  padding: 30px 0;
+  text-align: center;
+}
 .stats-admin {
   display: flex;
   flex-direction: column;

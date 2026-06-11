@@ -2,15 +2,15 @@
 import { reactive, ref } from "vue";
 import type { ArenaConfig } from "../physics/types";
 import { DEFAULT_ARENA } from "../physics/engine";
-import {
-  presets,
-  activeId,
-  addPreset,
-  updatePreset,
-  removePreset,
-  setActive,
-  resetBuiltin,
-} from "../store/arenaStore";
+import { localArenaApi, type ArenaStoreApi } from "../store/adminBackend";
+
+// 資料源注入：不傳 = localStorage（測試頁用那份）；/admin/* 會傳 D1 遠端版
+const props = withDefaults(defineProps<{ store?: ArenaStoreApi; showGoBattle?: boolean }>(), {
+  store: undefined,
+  showGoBattle: true, // 線上(D1)模式會關掉：測試頁吃的是本機數值，避免「改了線上以為測試頁也變了」
+});
+const store = props.store ?? localArenaApi;
+const { presets, activeId, ready, error } = store;
 
 defineEmits<{ (e: "go-battle"): void }>();
 
@@ -88,14 +88,14 @@ function loadToEditor(id: string) {
   editingId.value = p.id;
 }
 
-function saveAsNew() {
-  const p = addPreset(name.value, buildConfig());
+async function saveAsNew() {
+  const p = await store.addPreset(name.value, buildConfig());
   editingId.value = p.id;
 }
 
-function updateCurrent() {
+async function updateCurrent() {
   if (!editingId.value) return;
-  updatePreset(editingId.value, name.value, buildConfig());
+  await store.updatePreset(editingId.value, name.value, buildConfig());
 }
 
 function resetDraft() {
@@ -110,20 +110,25 @@ function resetDraft() {
   editingId.value = "";
 }
 
-function del(id: string) {
-  removePreset(id);
+async function del(id: string) {
+  await store.removePreset(id);
   if (editingId.value === id) resetDraft();
 }
 
 /** 內建場還原原廠（清掉 userEdited）；若正在編輯它，順手重載編輯器。 */
-function factoryReset(id: string) {
-  resetBuiltin(id);
+async function factoryReset(id: string) {
+  await store.resetBuiltin(id);
   if (editingId.value === id) loadToEditor(id);
 }
 </script>
 
 <template>
-  <div class="admin">
+  <div v-if="error" class="store-error">
+    ⚠️ {{ error }}
+    <button v-if="store.reload" class="retry" @click="store.reload()">重試</button>
+  </div>
+  <div v-if="!ready && !error" class="store-loading">載入線上設定中…</div>
+  <div v-else-if="ready" class="admin">
     <!-- 編輯器 -->
     <section class="editor card">
       <h3>場地參數編輯器</h3>
@@ -211,19 +216,58 @@ function factoryReset(id: string) {
             <span class="tag builtin" v-if="p.builtin">內建</span>
           </div>
           <div class="ops">
-            <button @click="setActive(p.id)" :disabled="p.id === activeId">套用</button>
+            <button @click="store.setActive(p.id)" :disabled="p.id === activeId">套用</button>
             <button @click="loadToEditor(p.id)">編輯</button>
             <button v-if="p.builtin && p.userEdited" @click="factoryReset(p.id)" title="還原成程式碼原廠值">↺ 原廠</button>
-            <button class="danger" @click="del(p.id)">刪除</button>
+            <button
+              class="danger"
+              :disabled="presets.length <= 1"
+              :title="presets.length <= 1 ? '至少要保留一個場地' : ''"
+              @click="del(p.id)"
+            >刪除</button>
           </div>
         </li>
       </ul>
-      <button class="go" @click="$emit('go-battle')">→ 回對戰場試打</button>
+      <button v-if="props.showGoBattle" class="go" @click="$emit('go-battle')">→ 回對戰場試打</button>
+      <p v-else class="online-note">測試頁（🧪 / 📱）吃的是「本機測試」那份設定，這裡改的是線上對戰用的全域設定。</p>
     </section>
   </div>
 </template>
 
 <style scoped>
+.store-error {
+  background: rgba(255, 93, 93, 0.08);
+  border: 1px solid rgba(255, 93, 93, 0.35);
+  color: var(--red);
+  border-radius: 9px;
+  padding: 9px 13px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.store-error .retry {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.online-note {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+.store-loading {
+  color: var(--muted);
+  font-size: 14px;
+  padding: 30px 0;
+  text-align: center;
+}
 .admin {
   display: grid;
   grid-template-columns: 1.3fr 1fr;
