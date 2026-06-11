@@ -130,19 +130,13 @@ async function save() {
             </select>
           </label>
           <label class="row">
-            <span>旋向</span>
-            <select v-model="form.defaultSpin">
-              <option value="right">↺ 逆時針（右旋）</option>
-              <option value="left">↻ 順時針（左旋）</option>
-            </select>
-          </label>
-          <label class="row">
             <span>必殺技</span>
             <select v-model="form.defaultSpecial">
               <option v-for="o in SPECIAL_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>
           </label>
         </div>
+        <p class="hint">旋向由房間決定：先手（紅）固定右旋、後手（藍）固定左旋——保證每場反向對撞。</p>
 
         <div class="group-title">🎮 操作偏好</div>
         <div class="grid2">

@@ -23,6 +23,7 @@ import {
   mergeLoadout,
   randomBotAim,
   randomBotLoadout,
+  sideSpinDir,
   BOT_UID,
   BOT_NICKNAME,
   type AimInput,
@@ -173,7 +174,13 @@ export class BattleRoomDO extends DurableObject<Env> {
     const existing = room.players[side];
     room.players[side] = existing?.uid === user.uid
       ? { ...existing, nickname: user.nickname, picture: user.picture } // 重連：保留本局 loadout
-      : { uid: user.uid, nickname: user.nickname, picture: user.picture, loadout: user.loadout };
+      : {
+          uid: user.uid,
+          nickname: user.nickname,
+          picture: user.picture,
+          // 旋向固定：先手 A 右旋、後手 B 左旋（個人設定的預設旋向在線上無效）
+          loadout: { ...user.loadout, spinDir: sideSpinDir(side) },
+        };
 
     // BOT 房：另一側還空著 → 讓內建 AI 入座
     if (wantBot) {
@@ -237,6 +244,7 @@ export class BattleRoomDO extends DurableObject<Env> {
         if ((room.phase === "waiting" || room.phase === "aiming") && !room.aims[att.side]) {
           const cfg = room.roundCfg ?? (await this.gameConfig());
           me.loadout = mergeLoadout(me.loadout, msg.loadout ?? {}, Object.keys(cfg.stats));
+          me.loadout.spinDir = sideSpinDir(att.side); // 旋向固定，client 改不動
           await this.saveRoom(room);
           await this.broadcastRoom(room);
         }
@@ -339,7 +347,7 @@ export class BattleRoomDO extends DurableObject<Env> {
     // 玩家只看得到 launched=✓；零計時器、hibernation 也不怕）
     const bot = room.botSide ? room.players[room.botSide] : undefined;
     if (room.botSide && bot?.isBot) {
-      bot.loadout = randomBotLoadout(Object.keys(room.roundCfg.stats));
+      bot.loadout = { ...randomBotLoadout(Object.keys(room.roundCfg.stats)), spinDir: sideSpinDir(room.botSide) };
       const aim = sanitizeAim(randomBotAim(room.botSide, room.roundCfg.arena), room.roundCfg.arena);
       room.aims[room.botSide] = aim ?? defaultAim(room.botSide, room.roundCfg.arena);
     }

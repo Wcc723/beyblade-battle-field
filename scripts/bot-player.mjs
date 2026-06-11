@@ -75,8 +75,9 @@ ws.on("message", (data) => {
   } else if (msg.type === "round") {
     pendingLaunch = false;
     const o = msg.payload.outcome;
+    const spins = msg.payload.inits.map((i) => `${i.id}:${i.spinDir === 1 ? "右" : "左"}`).join(" ");
     log(
-      `🎬 ROUND R${o.roundNum}: winner=${o.winnerSide || "平手"} reason=${o.reason} +${o.points} → ${o.scoreA}:${o.scoreB} matchOver=${o.matchOver} (seed=${msg.payload.seed}, inits=${msg.payload.inits.length})`,
+      `🎬 ROUND R${o.roundNum}: winner=${o.winnerSide || "平手"} reason=${o.reason} +${o.points} → ${o.scoreA}:${o.scoreB} matchOver=${o.matchOver} (seed=${msg.payload.seed}, 旋向 ${spins})`,
     );
     if (!o.matchOver && isDriver) {
       setTimeout(() => {

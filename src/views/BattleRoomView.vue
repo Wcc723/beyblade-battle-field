@@ -119,9 +119,6 @@ function copyCode() {
 function onTypeChange() {
   online.sendLoadout({ type: mySetup.value.preset });
 }
-function onSpinChange() {
-  online.sendLoadout({ spinDir: mySetup.value.spinDir });
-}
 function onSpecialChange() {
   online.sendLoadout({ special: mySetup.value.special });
 }
@@ -221,11 +218,8 @@ function onSpecialChange() {
             <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
           </select>
         </label>
-        <label>旋向
-          <select v-model.number="mySetup.spinDir" @change="onSpinChange">
-            <option :value="1">↺ 右旋</option>
-            <option :value="-1">↻ 左旋</option>
-          </select>
+        <label>旋向（房間固定）
+          <span class="spin-fixed">{{ mySide === "B" ? "↻ 左旋（後手）" : "↺ 右旋（先手）" }}</span>
         </label>
         <label class="span2">必殺技
           <select v-model="mySetup.special" @change="onSpecialChange">
@@ -570,6 +564,17 @@ function onSpecialChange() {
   border-radius: 9px;
   padding: 10px;
   font-size: 15px;
+}
+.spin-fixed {
+  display: flex;
+  align-items: center;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  padding: 10px;
+  font-size: 14px;
+  opacity: 0.85;
 }
 .m-spinfo {
   margin: 0;

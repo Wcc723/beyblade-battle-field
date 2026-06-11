@@ -70,6 +70,7 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 
 - **架構**：`worker/battleRoomDO.ts`（權威狀態機 waiting→aiming(45s alarm)→simulate→review/finished）＋ `src/game/room.ts`（協定+純函式）＋ `src/game/scoring.ts`（計分，前端/DO 共用）＋ `useOnlineBattle.ts`（WS 客戶端）＋ `BattleRoomView.vue`。client 只送瞄準輸入 `AimInput`，stats/special 由 DO 依 loadout+D1 組裝（防竄改）；seed 雙方提交後才產生；**廣播「重跑包」inits+seed+config（~2KB）兩端重跑同一份確定性引擎**，不傳 1.5MB frames。
 - **內建 BOT**：開房帶 `?bot=1` → AI 入座另一側，每回合隨機配置 + `startAiming` 時預提交隱藏 aim（零計時器、不怕 hibernation）。測試工具 `scripts/bot-player.mjs`（可全自動打整場）。
+- **線上旋向固定**：先手 A＝右旋、後手 B＝左旋（`sideSpinDir`，DO 在 join/loadout/BOT 三處強制蓋回，client 改不動）→ 每場保證反向對撞（oppSpinBonus）。測試頁不受限。
 - **DO 雷區（都踩過）**：① input gate 只擋 storage、不擋 D1 查詢——handler 中 `await` D1 時另一事件會交錯執行 read-modify-write → **所有改房間狀態的事件必須走 `run()` promise 串列化**；② alarm 只有一個 slot——瞄準鬧鐘在 `runRound` 後必須 `deleteAlarm()`，且清房要驗 `idleSince` 時戳（殘留鬧鐘提早到點不可誤刪）；③ `RoundPayload` 要落地 storage，join 時對 review/finished 補發（錯過廣播的玩家才看得到回放）；④ 每回合 `roundCfg` 凍結全域設定（消毒與模擬同基準）。
 - **前端雷區**：對手先按下一回合時不能硬切回放（pendingAiming 暫存、播完再切）；發射音效在「真正送出」才播。
 

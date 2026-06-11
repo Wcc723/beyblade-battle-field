@@ -6,6 +6,7 @@ import {
   mergeLoadout,
   randomBotAim,
   randomBotLoadout,
+  sideSpinDir,
   type AimInput,
 } from "../src/game/room";
 import { roundPoints, WIN_SCORE } from "../src/game/scoring";
@@ -100,6 +101,14 @@ describe("mergeLoadout（client 配置更新驗證）", () => {
 describe("WIN_SCORE", () => {
   it("先到 3 分", () => {
     expect(WIN_SCORE).toBe(3);
+  });
+});
+
+describe("sideSpinDir（線上旋向固定）", () => {
+  it("先手 A 右旋、後手 B 左旋（永遠反向）", () => {
+    expect(sideSpinDir("A")).toBe(1);
+    expect(sideSpinDir("B")).toBe(-1);
+    expect(sideSpinDir("A")).not.toBe(sideSpinDir("B"));
   });
 });
 

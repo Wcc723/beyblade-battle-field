@@ -12,6 +12,15 @@ import { DEFAULT_SCALES } from "../physics/engine";
 export type Side = "A" | "B";
 export const SIDE_COLORS: Record<Side, string> = { A: "#ff5d5d", B: "#5db4ff" };
 
+/**
+ * 線上對戰旋向固定（不開放調整）：先手 A＝右旋、後手 B＝左旋。
+ * 兩顆永遠反向 → 每場都吃引擎的反向對撞加成（oppSpinBonus），對撞更有戲。
+ * DO 端是權威（join/loadout/BOT 都強制蓋回）；前端只做顯示。
+ */
+export function sideSpinDir(side: Side): 1 | -1 {
+  return side === "A" ? 1 : -1;
+}
+
 /** 玩家配置（伺服器端真相；client 的 loadout 訊息只能改這個） */
 export interface PlayerLoadout {
   type: string; // attack | defense | stamina | balance（驗證時對 stats keys）
