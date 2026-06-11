@@ -14,7 +14,7 @@
  */
 import type { SessionData } from "./session";
 import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../src/physics/types";
-import { DEFAULT_ARENA, XTREME_STADIUM, DEFAULT_SPECIAL } from "../src/physics/engine";
+import { DEFAULT_ARENA, XTREME_STADIUM, ARC_WALL_STADIUM, DEFAULT_SPECIAL } from "../src/physics/engine";
 import { STAT_PRESETS } from "../src/physics/presets";
 import { autoNickname } from "../src/game/names";
 
@@ -28,10 +28,12 @@ function defaultConfigValue(key: ConfigKey): unknown {
       return {
         presets: [
           { id: "default", name: "預設場地", config: { ...DEFAULT_ARENA } },
-          { id: "builtin-xtreme", name: "Beyblade X · Xtreme Stadium", config: { ...XTREME_STADIUM }, builtin: true },
+          // 顯示名已去 IP；preset id "builtin-xtreme" 為內部識別子，保留不動（API 相容）
+          { id: "builtin-xtreme", name: "熔核競技場 FORGE CORE STADIUM", config: { ...XTREME_STADIUM }, builtin: true },
+          { id: "builtin-arcwall", name: "弧壁競技場 ARC WALL STADIUM", config: { ...ARC_WALL_STADIUM }, builtin: true },
         ],
-        // 預設啟用 Xtreme（正式對戰現役場地）：migration 0004 清除 D1 blob 後回落到這裡，
-        // 若預設是圓形場會讓正式站默默換場。
+        // 預設啟用熔核競技場（正式對戰現役場地）：migration 0004 清除 D1 blob 後回落到這裡，
+        // 若預設是圓形場會讓正式站默默換場。弧壁競技場給管理員選用，不改 activeId。
         activeId: "builtin-xtreme",
       };
     case "stats":

@@ -21,7 +21,7 @@ import type {
   WinReason,
 } from "./types";
 import { makeRng } from "./prng";
-import { rimAt, softWallRadiusAt, softWallNormalAt, softWallAccelAt } from "./arena";
+import { rimAt, softWallRadiusAt, softWallNormalAt, softWallAccelAt, boundaryRadiusAt, boundaryNormalAt } from "./arena";
 
 /** 必殺技數值（集中可調，可被 SimConfig.special 覆寫） */
 export const DEFAULT_SPECIAL: SpecialConfig = {
@@ -133,6 +133,37 @@ export const DEFAULT_SCALES = {
   maxSpin: 3000,
 };
 
+/**
+ * 速度主導傷害分配的強度：dmg ×(1 ∓ split)，split = 本值 × tanh(進攻度 aggr / 銳化係數)。
+ * 進攻方（撞擊瞬間沿法線衝得快的一方）少吃傷害、被撞方多吃 → 致命大撞擊天然不對稱，
+ * 同步雙 KO（雙方血量同一步歸零＝平手）變罕見。0 = 關閉（回到對稱分配）。
+ * 銳化（tanh）：近對稱的猛烈互撞裡，微小的速度優勢就放大成顯著傷害差——鏡像對局
+ * （雙方發射力道必有差）因此也能在致命一擊分出單方勝負；完全對稱輸入 aggr=0 仍不變。
+ */
+export const AGGRESSOR_DMG_SPLIT = 0.78;
+/** tanh 銳化係數：aggr 達此值時 split 已到 0.76×上限；越小越「贏者全拿」 */
+export const AGGR_SHARPNESS = 0.15;
+/**
+ * 進攻方「減傷側」的折扣：受擊方加傷 ×(1+split) 全額（消同步雙 KO 的主力），
+ * 但進攻方自身只少吃 split×本值（不全額免傷）——否則高速型靠衝撞幾乎免疫慢速型的磨血，
+ * 會打歪猜拳三角（防禦剋攻擊靠的就是慢速磨血）。
+ */
+export const AGGRESSOR_GUARD = 1.0;
+/**
+ * split 的衝擊力門檻（線性淡入）：impact ≤ MIN 完全對稱（低速擦撞/磨血不受 split 影響，
+ * 防禦型的磨血戰術才成立）；impact ≥ FULL 全額 split（致命重擊天然不對稱 → 消同步雙 KO）。
+ */
+export const SPLIT_IMPACT_MIN = 90;
+export const SPLIT_IMPACT_FULL = 220;
+
+/**
+ * 傷害用攻防比的「軟膝」壓縮：recv = atk/def ≤ 1 不變；> 1 的部分乘上本係數。
+ * 現行預設下只有攻擊型鏡像對局（1.5/0.8 = 1.875）落在 > 1 區——壓低其單發傷害佔血池比例
+ * （雙 KO 的主要來源），其他對局（recv ≤ 1.0）完全不受影響。只作用於扣血，不影響擊退物理。
+ */
+export const DMG_RECV_SOFT = 0.15;
+const softenRecv = (r: number) => (r <= 1 ? r : 1 + (r - 1) * DMG_RECV_SOFT);
+
 /** 預設場地參數（手感基準，可在 UI 即時調整） */
 export const DEFAULT_ARENA: ArenaConfig = {
   radius: 300,
@@ -141,7 +172,7 @@ export const DEFAULT_ARENA: ArenaConfig = {
   swirl: 110,
   spinDecayBase: 56,
   restitution: 0.6,
-  collisionSpinLoss: 1.36,
+  collisionSpinLoss: 1.28,
   knockback: 1.8,
   oppSpinBonus: 1.5,
   spinKnockback: 0.14,
@@ -155,11 +186,12 @@ export const DEFAULT_ARENA: ArenaConfig = {
 };
 
 /**
- * Beyblade X 風「Xtreme Stadium」內建場地（正方形場 + 綠色 M 形軟牆）：
+ * 熔核競技場「FORGE CORE STADIUM」內建場地（正方形場 + 熔岩 M 形內牆，參考實體陀螺場地）。
+ * （識別子 XTREME_STADIUM / preset id "builtin-xtreme" 為內部 API 相容性保留，僅顯示名去 IP。）
  *  - 方形邊界 box：四邊會反彈、四個角 = 出界口（計分 2）。
- *  - 綠色軟牆 softWall（M 形 Xtreme Line）：內層半透膜，頂部凹口把陀螺導向中心逼對撞；
- *    撞夠猛（沿真實法線向外速 > passThroughSpeed）才穿過綠牆進外圈 → 被甩進四角才出界。
- *  - 頂部加速區（Xtreme Dash）：凹口弧段內爆發加速 + 向心拉。
+ *  - 內層軟牆 softWall（M 形內牆）：內層半透膜，頂部凹口把陀螺導向中心逼對撞；
+ *    撞夠猛（沿真實法線向外速 > passThroughSpeed）才穿過內牆進外圈 → 被甩進四角才出界。
+ *  - 頂部加速區：凹口弧段內爆發加速 + 向心拉。
  * ⚠ 物理手感（出界率等）為起點值，需 `npm run balance` 的 XTREME 探針再校。
  */
 export const XTREME_STADIUM: ArenaConfig = {
@@ -189,6 +221,33 @@ export const XTREME_STADIUM: ArenaConfig = {
     accelInward: 110,
     accelMinSpin: 0.12,
   },
+};
+
+/**
+ * 弧壁競技場「ARC WALL STADIUM」內建場地（超橢圓邊界：方中帶弧、四邊外凸、四角出界）：
+ *  - 邊界 r(θ) = radius·2^(1/p−1/2) / (|cosθ|^p + |sinθ|^p)^(1/p)，p = 3.5 → 四邊外凸弧形牆；
+ *    對角正規化 → 最遠點（對角）恰為 radius，邊界恆在外接圓內（前端縮放不必改）。
+ *  - 四個對角（45°/135°/225°/315°）= 出界扇區（rim pocket：出界門檻較低、飛出得 2 分），
+ *    四邊中段門檻極高 → 幾乎必反彈 → 弧形牆把外滑的陀螺導向對角。
+ *  - 幾何查詢共用 arena.ts 的 boundaryRadiusAt / boundaryNormalAt（畫面與物理同源、確定性）。
+ * 給管理員選用的新場地（activeId 仍為 builtin-xtreme，不影響現役平衡）。
+ */
+export const ARC_WALL_STADIUM: ArenaConfig = {
+  ...DEFAULT_ARENA,
+  radius: 300,
+  superellipse: { power: 3.5 },
+  // 邊界較「貼身」（四邊中段 ~0.86R）→ 拉力/繞圈略收，避免長時間貼牆磨血
+  centerPull: 105,
+  swirl: 95,
+  wallBounce: 0.72,
+  // 四邊中段：門檻極高 → 幾乎必反彈；出界只能走對角扇區（rim 覆寫門檻 150）
+  ringOutSpeed: 420,
+  rim: [
+    { angle: Math.PI / 4, half: 0.32, kind: "pocket", ringOutSpeed: 150, score: 2 },
+    { angle: (3 * Math.PI) / 4, half: 0.32, kind: "pocket", ringOutSpeed: 150, score: 2 },
+    { angle: (-3 * Math.PI) / 4, half: 0.32, kind: "pocket", ringOutSpeed: 150, score: 2 },
+    { angle: -Math.PI / 4, half: 0.32, kind: "pocket", ringOutSpeed: 150, score: 2 },
+  ],
 };
 
 export const DEFAULT_SIM: Omit<SimConfig, "arena"> = {
@@ -496,7 +555,7 @@ function integrate(bodies: Body[], arena: ArenaConfig, dt: number): void {
       b.vy += ty * arena.swirl * spinNorm * dt;
     }
 
-    // 2.5) 加速軌道（Xtreme Line）：在環帶上 → 沿自旋方向切向加速 + 可選向心拉。
+    // 2.5) 加速軌道（環形加速帶）：在環帶上 → 沿自旋方向切向加速 + 可選向心拉。
     // 只在 arena.rail 存在時生效 → 既有場地完全不受影響。施加量 ∝ 自旋，隨自旋衰減而遞減。
     const rail = arena.rail;
     if (rail && spinNorm >= (rail.minSpin ?? 0) && Math.abs(r - rail.radius) <= rail.band) {
@@ -508,7 +567,7 @@ function integrate(bodies: Body[], arena: ArenaConfig, dt: number): void {
       }
     }
 
-    // 2.6) 綠色軟牆頂部加速區（Xtreme Dash）：在頂端凹口弧段、貼牆且夠快 →
+    // 2.6) 軟牆頂部加速區：在頂端凹口弧段、貼牆且夠快 →
     // 沿自旋方向切向爆發 + 沿「真實內法線」向心拉（凹口法線指向中心 → funnel 逼對撞）。
     // 只在 arena.softWall.accelBoost 存在時生效，施加量 ∝ 自旋 → 隨自旋衰減、不會變發射器。
     // 與 resolveWalls 的綠牆一致：跟著 softWall 走（不綁 box），方形/圓形場皆可；貼地時才作用。
@@ -593,6 +652,12 @@ function resolveCollisions(
       const velAlongNormal = rvx * nx + rvy * ny;
       if (velAlongNormal > 0) continue; // 正在分離，不處理
 
+      // 進攻度（碰撞改速「前」取樣）：各自沿法線衝向對方的速度分量差，正規化到 [-1,1]。
+      // >0 = a 衝得快（進攻方）；追撞逃逸方時 → ±1（全額進攻）。傷害分配用（見下方 dmg 區塊）。
+      const sa = a.vx * nx + a.vy * ny; // a 衝向 b 的分量（法線 a→b）
+      const sb = -(b.vx * nx + b.vy * ny); // b 衝向 a 的分量
+      const aggr = clamp((sa - sb) / Math.max(1e-6, Math.abs(sa) + Math.abs(sb)), -1, 1);
+
       // 反向旋轉（左右旋對撞）→ 接觸點切線速度相加，撞擊更猛；同向為基準
       const clash = a.spinDir === b.spinDir ? 1 : arena.oppSpinBonus;
 
@@ -627,11 +692,20 @@ function resolveCollisions(
 
       // 碰撞傷害扣「血量（耐久）」：攻擊 / 防禦 + 旋向加成參與。
       // 自旋只隨時間衰減，碰撞不直接扣自旋 → 攻擊型靠撞擊扣血、但需在自己續航耗盡前擊破。
+      // 速度主導的傷害分配（傷害結構重校）：進攻方（aggr）多打傷害、少吃傷害——
+      // 大力衝撞是不對稱的 → 致命一擊幾乎只殺被撞方，同步雙 KO（雙方同步歸零＝平手）自然罕見。
+      // 對稱對撞（等速互衝）aggr=0 → 分配不變；確定性不破（純讀碰撞前狀態、無新亂數）。
       // 最終值各自乘 ±10% 浮動（seeded rng → 同 seed 仍逐位元一致）：避免完全對稱輸入打出完全平手。
       const impact = Math.abs(velAlongNormal);
       const dmg = impact * arena.collisionSpinLoss * clash;
-      const dmgA = dmg * clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4) * (0.9 + rng() * 0.2);
-      const dmgB = dmg * clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4) * (0.9 + rng() * 0.2);
+      // split 淡入：低速擦撞對稱、重擊全額不對稱（見 SPLIT_IMPACT_MIN/FULL 註解）
+      const splitGate = clamp((impact - SPLIT_IMPACT_MIN) / (SPLIT_IMPACT_FULL - SPLIT_IMPACT_MIN), 0, 1);
+      const split = AGGRESSOR_DMG_SPLIT * splitGate * Math.tanh(aggr / AGGR_SHARPNESS); // >0 → a 是進攻方：a 少吃、b 多吃
+      // 加傷側全額、減傷側打折（split>0：a 進攻 → a 享折扣減傷、b 吃全額加傷；split<0 反之）
+      const splitA = split > 0 ? split * AGGRESSOR_GUARD : split;
+      const splitB = split > 0 ? split : split * AGGRESSOR_GUARD;
+      const dmgA = dmg * (1 - splitA) * softenRecv(clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4)) * (0.9 + rng() * 0.2);
+      const dmgB = dmg * (1 + splitB) * softenRecv(clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4)) * (0.9 + rng() * 0.2);
       a.hp -= dmgA;
       b.hp -= dmgB;
 
@@ -829,7 +903,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
     if (!b.alive) continue;
     // 分身：照樣吃牆碰撞（被綠牆/邊界擋住 → 不會穿出綠框），只是不會「出界淘汰」（下面的 ring-out 死亡對分身略過、改成當實牆反彈）。
 
-    // 綠色實體內牆（M 形 Xtreme Line）：內層實體牆，方形場(box)與圓形場皆適用（與 box 解耦）。
+    // 綠色實體內牆（M 形內牆）：內層實體牆，方形場(box)與圓形場皆適用（與 box 解耦）。
     // 撞到沿外法線反彈、保留切向（沿牆滑）；只在「貼地（z ≤ wallHeight）」才阻擋；
     // 被碰撞擊飛到空中（z > wallHeight）→ 略過＝飛越綠牆，落到外層邊界判定
     // （方形場：四角出界/四邊反彈；圓形場：radius+rim 出界/反彈）。＝唯一出綠框的方式就是被打飛起來。
@@ -888,6 +962,13 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
       continue;
     }
 
+    // 超橢圓邊界（弧壁場）：r(θ) 弧形牆反彈 / 對角扇區出界。
+    // 圓形場（未設 superellipse）走下方原路徑 → 既有場地行為逐位元不變。
+    if (arena.superellipse) {
+      resolveSuperellipseWall(b, arena, step);
+      continue;
+    }
+
     const r = Math.hypot(b.px, b.py);
     const limit = arena.radius - b.radius; // 陀螺邊緣貼到護牆的中心距離
     if (r <= limit) continue;
@@ -919,6 +1000,40 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
   }
 }
 
+/**
+ * 超橢圓邊界牆（弧壁場）：邊界 r(θ) 由 boundaryRadiusAt 查詢（與 ArenaSvg 描繪同源），
+ * 法線用隱函數梯度（boundaryNormalAt，解析微分 → 確定性、無數值抖動）。
+ * 出界門檻沿用 rim 分區機制：對角 pocket 門檻低 → 沿法線向外夠快即出界（得分語意由
+ * rim score / roundPoints 自動成立）；四邊中段吃全域高門檻 → 反彈牆。
+ */
+function resolveSuperellipseWall(b: Body, arena: ArenaConfig, step: number): void {
+  const r = Math.hypot(b.px, b.py) || 1e-6;
+  const theta = Math.atan2(b.py, b.px);
+  const limit = boundaryRadiusAt(arena, theta) - b.radius; // 陀螺邊緣貼到弧壁的中心距離
+  if (r <= limit) return;
+
+  const n = boundaryNormalAt(arena, theta); // 單位外法線（超橢圓梯度）
+  const outwardVel = b.vx * n.nx + b.vy * n.ny; // 沿外法線速度（>0 向外）
+  const rp = rimAt(arena, theta);
+
+  // 對角出界扇區：被打得夠猛 → 衝出弧壁 Ring-out（分身不出界 → 落到下面當實牆反彈）
+  if (outwardVel > rp.ringOutSpeed && !b.isClone) {
+    markDead(b, step, "ring-out");
+    b.ringOutAngle = theta;
+    return;
+  }
+
+  // 否則反彈：沿徑向縮回界內（θ 不變 → 必在 r(θ) 邊界內）、反射沿真實法線、保留切向（沿弧牆滑）
+  const k = limit / r;
+  b.px *= k;
+  b.py *= k;
+  if (outwardVel > 0) {
+    b.vx -= (1 + rp.wallBounce) * outwardVel * n.nx;
+    b.vy -= (1 + rp.wallBounce) * outwardVel * n.ny;
+    b.spin -= outwardVel * arena.wallSpinLoss;
+  }
+}
+
 /** 標記淘汰，並保留死亡瞬間的原始 hp/spin（未夾 0、可為負）→ 同步雙亡比「超殺深度」用 */
 function markDead(b: Body, step: number, reason: WinReason): void {
   b.alive = false;
@@ -947,10 +1062,11 @@ function checkDeaths(bodies: Body[], arena: ArenaConfig, step: number): void {
       continue;
     }
 
-    // 出界判負（圓形場：中心離原點超過半徑）。方形場由 resolveWalls 處理角落出界，這裡略過。
+    // 出界判負（圓形/超橢圓場：中心距超過該方向的邊界半徑）。方形場由 resolveWalls 處理角落出界，這裡略過。
     if (!arena.box) {
       const distFromCenter = Math.hypot(b.px, b.py);
-      if (distFromCenter > arena.radius) {
+      const bound = arena.superellipse ? boundaryRadiusAt(arena, Math.atan2(b.py, b.px)) : arena.radius;
+      if (distFromCenter > bound) {
         markDead(b, step, "ring-out");
       }
     }
@@ -958,8 +1074,8 @@ function checkDeaths(bodies: Body[], arena: ArenaConfig, step: number): void {
 }
 
 /**
- * 同步「同類」雙亡 tie-break：比超殺深度，較不慘者勝。
- * 主指標 = 死亡瞬間 hp/maxHp（雙擊破時為負 → 較不負者勝；雙停轉/雙出界時為剩餘血量比例）。
+ * 同步「同類」雙亡 tie-break（僅雙停轉 / 雙出界）：比剩餘血量＝「誰比較健康」，較健康者勝。
+ * 主指標 = 死亡瞬間 hp/maxHp（剩餘血量比例；停轉/出界不扣血 → 恆為非負，語意是健康度而非超殺深度）。
  * hp 比例完全相等（傷害 ±10% 獨立浮動下幾乎不可能）才比 spin/maxSpin 超過量；再相等 → null = 平手。
  * 只讀模擬內既有狀態（markDead 記下的未夾 0 數值），不引入新隨機 → 確定性不破。
  */
@@ -1005,9 +1121,10 @@ function determineOutcome(allBodies: Body[]): {
         reason: second.deathReason ?? "draw",
       };
     }
-    // 同一步雙亡：「同類死法」才比超殺深度 tie-break（雙擊破/雙停轉/雙出界）；
+    // 同一步雙亡：僅「雙停轉 / 雙出界」比剩餘血量 tie-break（誰比較健康，語意正當）；
+    // 同步雙擊破（雙方 hp 同步歸零）＝真平手，不比超殺深度（使用者裁定：靠傷害結構讓雙 KO 罕見）；
     // 死法不同（混合同步）維持現行優先序 = 平手。tie-break 只用模擬內既有狀態 → 確定性不變。
-    if (first.deathReason && first.deathReason === second.deathReason) {
+    if (first.deathReason && first.deathReason === second.deathReason && first.deathReason !== "ko") {
       const winner = overkillTieBreak(first, second);
       if (winner) {
         const loser = winner === first ? second : first;

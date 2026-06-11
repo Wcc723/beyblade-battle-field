@@ -36,6 +36,16 @@ function match(redType: T, blueType: T, arena: ArenaConfig, rng: () => number) {
 it("balance", () => {
   const rng = makeRng(20260608);
   const reasons: Record<string, number> = { "ring-out": 0, "spin-out": 0, timeout: 0, draw: 0, ko: 0, burst: 0 };
+  // 平手構成診斷：雙KO / 雙停轉(hp 完全相等) / 雙出界 / 混合同步（死法不同）/ 其他（timeout 同分等）
+  const drawKinds: Record<string, number> = { "雙ko": 0, "雙spin-out": 0, "雙ring-out": 0, "混合同步": 0, "其他": 0 };
+  const classifyDraw = (r: ReturnType<typeof match>) => {
+    const [d1, d2] = r.deathEvents;
+    if (d1 && d2) {
+      drawKinds[d1.reason === d2.reason ? `雙${d1.reason}` : "混合同步"]++;
+    } else {
+      drawKinds["其他"]++;
+    }
+  };
   // h2h[x][y] = x 對 y 的勝率（side-averaged）
   const h2h: Record<string, Record<string, number>> = {};
   for (const x of TYPES) h2h[x] = {};
@@ -54,6 +64,7 @@ it("balance", () => {
         const r = match(x, y, DEFAULT_ARENA, rng);
         reasons[r.reason]++;
         pr[r.reason]++;
+        if (!r.winnerId) classifyDraw(r);
         if (r.winnerId === "R") xWins++;
         if (r.winnerId) games++;
       }
@@ -62,6 +73,7 @@ it("balance", () => {
         const r = match(y, x, DEFAULT_ARENA, rng);
         reasons[r.reason]++;
         pr[r.reason]++;
+        if (!r.winnerId) classifyDraw(r);
         if (r.winnerId === "B") xWins++;
         if (r.winnerId) games++;
       }
@@ -86,6 +98,8 @@ it("balance", () => {
   for (const x of TYPES) console.log(`  ${x.padEnd(8)} ${overall[x].toFixed(1)}%`);
   console.log("\n=== 勝負原因分佈 ===");
   for (const k of Object.keys(reasons)) console.log(`  ${k.padEnd(9)} ${((reasons[k] / total) * 100).toFixed(1)}%`);
+  console.log("\n=== 平手構成（佔全部場數 %）===");
+  for (const k of Object.keys(drawKinds)) console.log(`  ${k.padEnd(12)} ${((drawKinds[k] / total) * 100).toFixed(2)}%（${drawKinds[k]} 場）`);
   console.log("\n=== 對戰勝率矩陣（列 vs 欄，列的勝率%）===");
   console.log("          " + TYPES.map((t) => t.padStart(9)).join(""));
   for (const x of TYPES) {
@@ -99,4 +113,4 @@ it("balance", () => {
       .join("  ");
     console.log(`  ${pair.padEnd(22)} ${parts}`);
   }
-});
+}, 120_000);

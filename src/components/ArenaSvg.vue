@@ -7,7 +7,7 @@
  */
 import { computed } from "vue";
 import type { ArenaConfig } from "../physics/types";
-import { effectiveRim, rimAt, sampleSoftWall } from "../physics/arena";
+import { effectiveRim, rimAt, sampleSoftWall, sampleBoundary, boundaryRadiusAt } from "../physics/arena";
 
 const props = defineProps<{ arena: ArenaConfig }>();
 
@@ -38,7 +38,7 @@ function pt(r: number, a: number): [number, number] {
 }
 
 /**
- * 熔岩軟牆（M 形 Xtreme Line）描繪：吃「引擎用的同一份」softWall r(θ)（sampleSoftWall），
+ * 熔岩軟牆（M 形內牆）描繪：吃「引擎用的同一份」softWall r(θ)（sampleSoftWall），
  * 等角取樣世界座標 → 畫布（含 y 翻轉，與 BattleViz.toCanvas 一致）→ 折線。畫面與物理同源。
  */
 function toSvgWorld(wx: number, wy: number): string {
@@ -60,9 +60,50 @@ function arcPath(r: number, a0: number, a1: number, large = 0, sweep = 1): strin
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r.toFixed(2)} ${r.toFixed(2)} 0 ${large} ${sweep} ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
+/* ---------- 超橢圓場（弧壁）幾何 ---------- */
+function svgPt(wx: number, wy: number): string {
+  return `${(C + wx * scale.value).toFixed(1)},${(C - wy * scale.value).toFixed(1)}`;
+}
+/** 以畫布中心為原點的等比縮放 transform（內圈拉絲紋用） */
+function ringTf(k: number): string {
+  const t = C * (1 - k);
+  return `translate(${t.toFixed(1)} ${t.toFixed(1)}) scale(${k})`;
+}
+const superG = computed(() => {
+  if (props.arena.box || !props.arena.superellipse) return null;
+  // 邊界路徑：吃「引擎用的同一份」r(θ)（sampleBoundary）→ 畫面與物理同源
+  const pts = sampleBoundary(props.arena, 288);
+  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${toSvgWorld(p.x, p.y)}`).join(" ") + " Z";
+  // 出界扇區（rim，弧壁場為四個對角 pocket）：沿邊界取樣的帶狀 hazard 區 + 計分標籤
+  const bandW = 30; // hazard 帶寬（world 單位）
+  const exits = effectiveRim(props.arena)
+    .map((seg) => {
+      const rp = rimAt(props.arena, seg.angle);
+      const N = 14;
+      const outer: string[] = [];
+      const inner: string[] = [];
+      for (let i = 0; i <= N; i++) {
+        const a = seg.angle - seg.half + (i / N) * seg.half * 2;
+        const r = boundaryRadiusAt(props.arena, a);
+        outer.push(svgPt(r * Math.cos(a), r * Math.sin(a)));
+        inner.unshift(svgPt((r - bandW) * Math.cos(a), (r - bandW) * Math.sin(a)));
+      }
+      const rl = boundaryRadiusAt(props.arena, seg.angle) - bandW - 20;
+      return {
+        pts: [...outer, ...inner].join(" "),
+        lx: C + rl * Math.cos(seg.angle) * scale.value,
+        ly: C - rl * Math.sin(seg.angle) * scale.value,
+        kind: rp.kind,
+        score: rp.score,
+      };
+    })
+    .filter((e) => e.kind !== "wall" || e.score > 1);
+  return { path, exits };
+});
+
 /* ---------- 圓形場幾何 ---------- */
 const circG = computed(() => {
-  if (props.arena.box) return null;
+  if (props.arena.box || props.arena.superellipse) return null;
   const R = props.arena.radius * scale.value; // 碗外緣（固定 = 292）
   const exits = effectiveRim(props.arena).map((seg) => {
     const rp = rimAt(props.arena, seg.angle);
@@ -191,7 +232,7 @@ const boxG = computed(() => {
       <!-- 四邊：會反彈的牆 -->
       <line v-for="(e, i) in boxG.edges" :key="'e' + i" :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" stroke="#aab4c4" stroke-width="7" stroke-linecap="round" />
 
-      <!-- 熔岩加速軌道（Xtreme Line）：頂端 M 形凹口，把陀螺往中心擠 -->
+      <!-- 熔岩加速軌道（M 形內牆）：頂端凹口，把陀螺往中心擠 -->
       <path v-if="railShape" :d="railShape" fill="none" stroke="url(#as-rail)" :stroke-width="swBandPx" stroke-linejoin="round" stroke-linecap="round" filter="url(#as-railglow)" />
 
       <!-- 角落計分 -->
@@ -209,6 +250,34 @@ const boxG = computed(() => {
       >2×</text><!-- 計分新制：出界一律 2 分（cornerScore 不再參與計分） -->
     </g>
 
+    <!-- 超橢圓場（弧壁）：四邊外凸弧形牆 + 對角出界扇區 -->
+    <g v-else-if="superG">
+      <path :d="superG.path" fill="url(#as-bowl)" filter="url(#as-bowlshadow)" />
+      <path :d="superG.path" fill="url(#as-shade)" />
+      <!-- 拉絲紋：低透明同形內圈（純裝飾，邊界路徑等比內縮） -->
+      <path :d="superG.path" fill="none" :transform="ringTf(0.82)" stroke="rgba(170,180,196,0.1)" stroke-width="1.5" />
+      <path :d="superG.path" fill="none" :transform="ringTf(0.6)" stroke="rgba(170,180,196,0.08)" stroke-width="1.5" />
+      <path :d="superG.path" fill="none" :transform="ringTf(0.36)" stroke="rgba(170,180,196,0.07)" stroke-width="1.5" />
+      <!-- 碗外緣：鋼色描邊 -->
+      <path :d="superG.path" fill="none" stroke="#7e8a9c" stroke-width="3" />
+
+      <!-- 對角出界扇區：黃黑警示斜紋帶 + 細紅描邊 + 計分標籤 -->
+      <g v-for="(e, i) in superG.exits" :key="'se' + i">
+        <polygon :points="e.pts" fill="url(#as-hazard)" fill-opacity="0.85" stroke="#e8442e" stroke-width="2" stroke-linejoin="round" />
+        <text
+          v-if="e.score > 1"
+          :x="e.lx"
+          :y="e.ly"
+          text-anchor="middle"
+          dominant-baseline="central"
+          fill="#ffb31f"
+          font-size="18"
+          font-weight="700"
+          font-family="'Big Shoulders Display', 'Noto Sans TC', sans-serif"
+        >2×</text>
+      </g>
+    </g>
+
     <!-- 圓形場 -->
     <g v-else-if="circG">
       <circle :cx="C" :cy="C" :r="circG.R" fill="url(#as-bowl)" filter="url(#as-bowlshadow)" />
@@ -220,7 +289,7 @@ const boxG = computed(() => {
       <!-- 碗外緣：鋼色描邊 -->
       <circle :cx="C" :cy="C" :r="circG.R" fill="none" stroke="#7e8a9c" stroke-width="3" />
 
-      <!-- 熔岩實體內牆（M 形 Xtreme Line）：圓形場也能套用（與 box 解耦），吃同一份 sampleSoftWall -->
+      <!-- 熔岩實體內牆（M 形）：圓形場也能套用（與 box 解耦），吃同一份 sampleSoftWall -->
       <path
         v-if="railShape"
         :d="railShape"

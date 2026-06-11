@@ -88,7 +88,7 @@ export function rimScoreAt(arena: ArenaConfig, angle: number | null): number {
 }
 
 /* =========================================================================
- * 綠色內牆（M 形 Xtreme Line）幾何 —— 手繪 SVG 同款「直線腿相切圓弧拱 + 水平凹底」。
+ * 綠色內牆（M 形）幾何 —— 手繪 SVG 同款「直線腿相切圓弧拱 + 水平凹底」（參考實體陀螺場地）。
  * （此模組只管「形狀」；牆是實體/軟牆、貼地擋/騰空越，皆由 engine.ts 決定。）
  * 構圖（世界座標，凹口在 topAngle，預設 +y）：基準半徑 R 的外圈大弧（底部 ~252°）
  *   + 兩條從外圈接縫到圓拱的直線腿 + 兩個外凸圓拱（半徑 cR）+ 頂端兩拱間的水平凹底線段（寬 ~5% 直徑）。
@@ -308,5 +308,55 @@ export function sampleSoftWall(sw: SoftWall): { x: number; y: number }[] {
   const o = getSwOutline(sw);
   const out = new Array<{ x: number; y: number }>(o.n);
   for (let i = 0; i < o.n; i++) out[i] = { x: o.px[i], y: o.py[i] };
+  return out;
+}
+
+/* =========================================================================
+ * 超橢圓邊界（弧壁場）幾何 —— r(θ) = radius·2^(1/p−1/2) / (|cosθ|^p + |sinθ|^p)^(1/p)。
+ * p ≈ 3~4 → 方中帶弧、四邊外凸、對角最遠。採「對角正規化」：乘上 2^(1/p−1/2) 讓最遠點
+ * （對角 45° 等）恰為 arena.radius → 邊界恆在外接圓（radius）內，前端以 radius 為縮放
+ * 基準的畫面/瞄準邏輯完全不必改；p = 2 時退化為圓（r ≡ radius）。
+ * 引擎（resolveWalls / checkDeaths）與 ArenaSvg（描繪）共用本層 → 畫面與物理同源。
+ * 純函式、法線用隱函數梯度（解析微分）→ 確定性。
+ * ========================================================================= */
+
+/** 邊界半徑 r(θ)：未設 superellipse → 圓（恆為 arena.radius）。 */
+export function boundaryRadiusAt(arena: ArenaConfig, theta: number): number {
+  const se = arena.superellipse;
+  if (!se) return arena.radius;
+  const p = Math.max(2, se.power);
+  const c = Math.abs(Math.cos(theta));
+  const s = Math.abs(Math.sin(theta));
+  const norm = Math.pow(2, 1 / p - 0.5); // 對角正規化：最遠點（對角）恰為 radius
+  return (arena.radius * norm) / Math.pow(Math.pow(c, p) + Math.pow(s, p), 1 / p);
+}
+
+/**
+ * 邊界單位外法線：超橢圓用隱函數 f = |x|^p + |y|^p 的梯度
+ * ∇f = (p·sign(x)|x|^(p−1), p·sign(y)|y|^(p−1))（解析、確定性）；圓 → 徑向。
+ */
+export function boundaryNormalAt(arena: ArenaConfig, theta: number): { nx: number; ny: number } {
+  const ct = Math.cos(theta);
+  const st = Math.sin(theta);
+  const se = arena.superellipse;
+  if (!se) return { nx: ct, ny: st };
+  const p = Math.max(2, se.power);
+  const r = boundaryRadiusAt(arena, theta);
+  const x = r * ct;
+  const y = r * st;
+  const gx = Math.sign(x) * Math.pow(Math.abs(x), p - 1);
+  const gy = Math.sign(y) * Math.pow(Math.abs(y), p - 1);
+  const len = Math.hypot(gx, gy) || 1e-9;
+  return { nx: gx / len, ny: gy / len };
+}
+
+/** 描繪來源：邊界等角取樣點（世界座標，閉合一圈）。ArenaSvg 畫弧壁場邊界的唯一來源。 */
+export function sampleBoundary(arena: ArenaConfig, n = 288): { x: number; y: number }[] {
+  const out = new Array<{ x: number; y: number }>(n);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU;
+    const r = boundaryRadiusAt(arena, a);
+    out[i] = { x: r * Math.cos(a), y: r * Math.sin(a) };
+  }
   return out;
 }

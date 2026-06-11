@@ -491,6 +491,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     playing.value = false;
     slowmo.value = false;
     cancelAnimationFrame(raf);
+    applyShake(0); // 暫停瞬間清掉容器震動位移（之後沒有 tick 再畫，不能殘留）
   }
   function togglePlay() {
     playing.value ? pause() : play();
@@ -636,11 +637,35 @@ export function useBattle(opts: UseBattleOptions = {}) {
   const PARTICLE_BUDGET = 120;
   let particleBudget = PARTICLE_BUDGET;
 
-  /* —— 場地震動：觸發/振幅由 curT 推導（scrub 也穩），每幀位移方向用亂數抖 ——
-   * 注意振幅是 canvas 內部座標（640px 寬），手機顯示時會縮到約 0.55~0.6 倍，
-   * 所以這裡的 px 要比「想要的視覺位移」大近一倍才有感。 */
+  /* —— 場地震動（容器級）：觸發/振幅由 curT 推導（scrub 也穩），每幀位移方向用亂數抖 ——
+   * 位移寫在 shakeEl（包住 ArenaSvg 底圖 + canvas 的容器）的 transform 上 →
+   * 整個場地（含 SVG 底圖、疊在場上的 HUD）一起晃，而不是只有 canvas 內容在抖。
+   * 常數以「顯示像素（640px 寬顯示時）」標定，寫入前依容器實際顯示寬等比換算
+   * （shakeScale = clientWidth / 640）→ 手機縮小顯示時震幅也等比縮，手感一致。 */
+  const shakeEl = ref<HTMLElement | null>(null);
+  // 顯示寬換算快取：每幀讀 clientWidth 會強制 layout → 綁定 / resize 時量一次即可
+  let shakeScale = 1;
+  function updateShakeScale() {
+    const el = shakeEl.value;
+    if (el && el.clientWidth > 0) shakeScale = el.clientWidth / SIZE;
+  }
+  watch(shakeEl, updateShakeScale);
+  let shakeApplied = false;
+  /** 把震幅寫進容器 transform（直接 DOM 寫入、不走響應式；視覺層允許瀏覽器亂數）；amp<=0 清空不殘留位移。 */
+  function applyShake(amp: number) {
+    const el = shakeEl.value;
+    if (!el) return;
+    if (amp > 0) {
+      const a = amp * shakeScale;
+      el.style.transform = `translate(${(Math.random() * 2 - 1) * a}px, ${(Math.random() * 2 - 1) * a}px)`;
+      shakeApplied = true;
+    } else if (shakeApplied) {
+      el.style.transform = "";
+      shakeApplied = false;
+    }
+  }
   const SHAKE_IMPACT_MIN = 80; // 強撞門檻（沿法線接近速度；與焊接火星同步——會噴火星的撞擊就會震）
-  const SHAKE_MAX = 18; // 撞擊震幅上限 px（canvas 座標）
+  const SHAKE_MAX = 12; // 撞擊震幅上限（顯示像素，640 寬基準）：強撞有明顯一震
   const SHAKE_DECAY = 8; // 指數衰減速率 → 約 0.45s 內歸零
   function shakeAmpAt(curT: number): number {
     if (reducedMotion) return 0;
@@ -651,15 +676,15 @@ export function useBattle(opts: UseBattleOptions = {}) {
       if (ce.impact < SHAKE_IMPACT_MIN) continue;
       const age = curT - ce.t;
       if (age < 0 || age >= 0.45) continue;
-      const a0 = Math.min(SHAKE_MAX, 5 + ((ce.impact - SHAKE_IMPACT_MIN) / 140) * (SHAKE_MAX - 5));
+      const a0 = Math.min(SHAKE_MAX, 4 + ((ce.impact - SHAKE_IMPACT_MIN) / 140) * (SHAKE_MAX - 4));
       amp = Math.max(amp, a0 * Math.exp(-age * SHAKE_DECAY));
     }
-    // KO / 出界瞬間：一次大震（停轉是緩慢收尾、不震）
+    // KO / 出界瞬間：一次大震（停轉是緩慢收尾、不震）；KO 18 / 出界 13（顯示像素），大但不暈
     for (const de of r.deathEvents) {
       if (de.reason === "spin-out") continue;
       const age = curT - de.t;
       if (age < 0 || age >= 0.6) continue;
-      amp = Math.max(amp, (de.reason === "ko" ? 26 : 19) * Math.exp(-age * 7));
+      amp = Math.max(amp, (de.reason === "ko" ? 18 : 13) * Math.exp(-age * 7));
     }
     return amp < 0.3 ? 0 : amp;
   }
@@ -1216,10 +1241,10 @@ export function useBattle(opts: UseBattleOptions = {}) {
       const idx = i0;
       const frame = lerpFrame(frames[i0], frames[i1], ph - i0);
       const curT = ph / 60; // dt=1/60、sampleEvery=1 → 幀索引即 t*60
-      // 場地震動：強撞/擊破/出界時整個 canvas 內容做衰減隨機偏移（reduced-motion 時關閉）
-      const shakeAmp = shakeAmpAt(curT);
+      // 場地震動（容器級）：強撞/擊破/出界時整個場地容器（SVG 底圖＋canvas）一起位移；
+      // 暫停 / 回放結束時傳 0 → 清掉殘留 transform（reduced-motion 時 shakeAmpAt 回 0）
+      applyShake(playing.value ? shakeAmpAt(curT) : 0);
       g.save();
-      if (shakeAmp > 0) g.translate((Math.random() * 2 - 1) * shakeAmp, (Math.random() * 2 - 1) * shakeAmp);
       // 軌跡尾巴：從尾(細透明)漸變到頭(粗實) → 更明顯、可辨隊伍
       const TAIL = 46;
       for (const b of frame.bodies) {
@@ -1298,7 +1323,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
 
       // 傷害/回血浮動數字（最上層）
       drawDamagePops(g, curT, frames);
-      g.restore(); // 結束場地震動位移（停格 banner 不隨震動偏移）
+      g.restore(); // 對應上方 save（隔離回放繪製的殘留狀態；震動已改寫在容器 transform）
 
       // 必殺技停格 banner：大字招式名（停格期間顯示，讓人看清是什麼招）
       if (freezeEvent.value) {
@@ -1332,7 +1357,8 @@ export function useBattle(opts: UseBattleOptions = {}) {
       return;
     }
 
-    // 瞄準階段：畫已鎖定的陀螺 + 目前拖曳
+    // 瞄準階段：畫已鎖定的陀螺 + 目前拖曳（非回放 → 確保容器震動 transform 已清空）
+    applyShake(0);
     if (launchA.value) drawTop(g, launchA.value.position.x, launchA.value.position.y, 0, 0, setupA.color, 26, true, setupA.preset);
     if (launchB.value) drawTop(g, launchB.value.position.x, launchB.value.position.y, 0, 0, setupB.color, 26, true, setupB.preset);
 
@@ -1497,10 +1523,15 @@ export function useBattle(opts: UseBattleOptions = {}) {
     if (canvas.value) ctx = canvas.value.getContext("2d");
     arena.value = getActiveConfig();
     arenaName.value = activePresetName();
+    updateShakeScale(); // 容器顯示寬快取（之後只在 resize 時更新）
+    window.addEventListener("resize", updateShakeScale);
     loadSprites();
     draw();
   });
-  onBeforeUnmount(() => cancelAnimationFrame(raf));
+  onBeforeUnmount(() => {
+    cancelAnimationFrame(raf);
+    window.removeEventListener("resize", updateShakeScale);
+  });
 
   return {
     // 場地 / 設定
@@ -1546,6 +1577,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     playRemoteRound,
     // 畫布 / 拖曳
     canvas,
+    shakeEl, // 場地震動容器（包 ArenaSvg + canvas 的 div；模板 ref="shakeEl" 綁定）
     SIZE,
     dragging,
     powerPct,

@@ -412,7 +412,7 @@ describe("方形邊界 (box: 四邊反彈 / 四角出界)", () => {
   });
 });
 
-describe("加速軌道 (Xtreme Line rail)", () => {
+describe("加速軌道 (accelerator rail)", () => {
   it("上軌沿自旋方向加速；離軌 / 無軌道則不變", () => {
     const run = (over: { rail?: ArenaConfig["rail"]; x?: number }) =>
       simulate(
@@ -573,7 +573,7 @@ describe("綠色實體內牆 (撞牆反彈 / 貼地擋・騰空越 / 四角出�
   });
 });
 
-describe("綠色加速區 (Xtreme Dash)", () => {
+describe("綠色加速區 (softwall dash)", () => {
   const swArena = () =>
     neutralArena({
       box: { half: 280, cornerGap: 60 },

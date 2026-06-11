@@ -21,7 +21,7 @@ const {
   arena, setupA, setupB, presetKeys, PRESET_LABELS,
   phase, launchMode, hintText,
   result, playhead, playing, speed, slowmo,
-  canvas, SIZE, dragging, powerPct,
+  canvas, shakeEl, SIZE, dragging, powerPct,
   onPointerDown, onPointerMove, onPointerUp,
   spinPct, hpPct, specialInfo,
   SPECIAL_NAMES, specialColor,
@@ -309,7 +309,8 @@ function onSpecialChange() {
     <!-- 場地（1:1 滿寬金屬擂台） -->
     <div class="plate plate--flush arena-plate">
       <div class="hazard"></div>
-      <div class="m-arena" @click="onArenaTap">
+      <!-- ref=震動容器 → 強撞時 SVG 底圖 + canvas 整體一起晃 -->
+      <div class="m-arena" ref="shakeEl" @click="onArenaTap">
         <ArenaSvg :arena="arena" />
         <canvas
           ref="canvas"

@@ -98,3 +98,25 @@ describe("beybladeName（uid + 類型穩定 hash）", () => {
     expect(diff).toBeGreaterThanOrEqual(80);
   });
 });
+
+describe("名池凍結鎖（使用者要求：名字不可因部署而變動）", () => {
+  // autoNickname / beybladeName 用「hash % 池長」選名 → 任何插入/刪除/重排都會讓全服名字洗牌。
+  // 此鎖用內容 checksum 釘死兩池：要改名只能「原位替換」單一條目（會改 checksum → 此測試逼你
+  // 有意識地更新常數並接受該條目對應使用者的名字改變），嚴禁調整順序與長度。
+  function fnv1a(s: string): number {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h >>> 0;
+  }
+  it("池長凍結（116 / 66）", () => {
+    expect(NICKNAME_POOL.length).toBe(116);
+    expect(BEYBLADE_POOL.length).toBe(66);
+  });
+  it("內容 checksum 凍結", () => {
+    expect(fnv1a(NICKNAME_POOL.join("\n")).toString(16)).toBe("8de8c6d4");
+    expect(fnv1a(BEYBLADE_POOL.join("\n")).toString(16)).toBe("ff147126");
+  });
+});

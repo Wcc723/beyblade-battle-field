@@ -11,7 +11,7 @@ const {
   phase, phaseText, launchA, launchB, launchMode, hintText,
   WIN_SCORE, scoreA, scoreB, roundNum, matchOver,
   result, playhead, playing, speed, slowmo,
-  canvas, SIZE, onPointerDown, onPointerMove, onPointerUp,
+  canvas, shakeEl, SIZE, onPointerDown, onPointerMove, onPointerUp,
   colorOf, teamIds, spinPct, hpPct,
   currentTime, roundResultLabel, championLabel, isFinished, specialInfo,
   togglePlay, pause, nextRound, resetMatch,
@@ -117,7 +117,8 @@ const {
         </div>
       </div>
 
-      <div class="canvas-wrap">
+      <!-- ref=震動容器 → 強撞時 SVG 底圖 + canvas 整體一起晃 -->
+      <div class="canvas-wrap" ref="shakeEl">
         <ArenaSvg :arena="arena" />
         <canvas
           ref="canvas"

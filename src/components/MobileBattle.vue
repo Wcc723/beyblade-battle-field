@@ -11,7 +11,7 @@ const {
   phase, phaseText, launchA, launchB, launchMode, hintText,
   WIN_SCORE, scoreA, scoreB, roundNum, matchOver,
   result, playhead, playing, speed, slowmo,
-  canvas, SIZE, dragging, powerPct,
+  canvas, shakeEl, SIZE, dragging, powerPct,
   onPointerDown, onPointerMove, onPointerUp,
   colorOf, teamIds, spinPct, hpPct,
   currentTime, roundResultLabel, championLabel, isFinished, specialInfo,
@@ -36,8 +36,8 @@ const phaseClass = computed(() =>
     </div>
     <div class="m-phase" :class="phaseClass">{{ phaseText }}</div>
 
-    <!-- 場地（主角） -->
-    <div class="m-arena">
+    <!-- 場地（主角）；ref=震動容器 → 強撞時 SVG 底圖 + canvas 整體一起晃 -->
+    <div class="m-arena" ref="shakeEl">
       <ArenaSvg :arena="arena" />
       <canvas
         ref="canvas"

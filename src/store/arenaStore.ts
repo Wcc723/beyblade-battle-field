@@ -5,7 +5,7 @@
  */
 import { ref } from "vue";
 import type { ArenaConfig } from "../physics/types";
-import { DEFAULT_ARENA, XTREME_STADIUM } from "../physics/engine";
+import { DEFAULT_ARENA, XTREME_STADIUM, ARC_WALL_STADIUM } from "../physics/engine";
 
 export interface ArenaPreset {
   id: string;
@@ -96,8 +96,14 @@ export function activePresetName(): string {
 
 /** 內建示範場登錄表（程式碼為來源）。exported：遠端後台的「還原原廠」也用它。 */
 export const BUILTINS: { name: string; config: ArenaConfig }[] = [
-  { name: "Beyblade X · Xtreme Stadium", config: XTREME_STADIUM },
+  { name: "熔核競技場 FORGE CORE STADIUM", config: XTREME_STADIUM },
+  { name: "弧壁競技場 ARC WALL STADIUM", config: ARC_WALL_STADIUM },
 ];
+
+/** 舊顯示名 → 新顯示名（去 IP 改名的一次性遷移；內部識別子不變，只改使用者可見名稱）。 */
+const RENAMED_BUILTINS: Record<string, string> = {
+  "Beyblade X · Xtreme Stadium": "熔核競技場 FORGE CORE STADIUM",
+};
 
 /**
  * 內建場同步（冪等）：
@@ -135,6 +141,14 @@ export function resetBuiltin(id: string): void {
 // 首次使用：種一組預設場地，確保一定有可套用的設定
 if (presets.value.length === 0) {
   addPreset("預設場地", DEFAULT_ARENA);
+}
+// 舊存檔的內建場顯示名遷移（保留 id / config / userEdited，只改名 → 不會生出重複場地）
+for (const p of presets.value) {
+  const renamed = RENAMED_BUILTINS[p.name];
+  if (renamed && !presets.value.some((x) => x.name === renamed)) {
+    p.name = renamed;
+    persist();
+  }
 }
 // 內建示範場（使用者改過的不會被覆寫）
 for (const b of BUILTINS) ensureBuiltin(b.name, b.config);

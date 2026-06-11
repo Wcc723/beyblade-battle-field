@@ -38,6 +38,23 @@ export default {
       return Response.json({ ok: true, service: "beyblade-battle-field" });
     }
 
+    // --- 打擊音效取樣（R2，公開資產不需登入）---
+    // 檔名白名單格式（hit-l-0.wav 之類）防奇形怪狀 key；R2 缺檔回 404，前端會自動回退合成音效。
+    if (path.startsWith("/api/sfx/") && request.method === "GET") {
+      const key = path.slice("/api/sfx/".length);
+      if (!/^[a-z0-9-]+\.wav$/.test(key)) return new Response("bad key", { status: 400 });
+      const obj = await env.SFX.get(key);
+      if (!obj) return new Response("not found", { status: 404 });
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": "audio/wav",
+          // 內容不可變（改音效會換檔名）→ 瀏覽器與 CDN 都可長快取
+          "Cache-Control": "public, max-age=31536000, immutable",
+          ...(obj.httpEtag ? { ETag: obj.httpEtag } : {}),
+        },
+      });
+    }
+
     // --- 認證 ---
     // 設定缺漏要早爆且指名（部署漏打 wrangler secret put 時，不要讓使用者
     // 走完 Google 流程才在最後一步 500 / 或帶 client_id=undefined 去 Google）

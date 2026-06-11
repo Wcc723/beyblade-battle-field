@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SFX LAB — 金屬陀螺打擊感試聽室</title>
+<style>
+/* 色票對齊 src/styles/forge.css（BURST FORGE tokens） */
+:root {
+  color-scheme: dark;
+  --bg: #0c0e12; --panel: #1b1e24; --panel-2: #22262e; --panel-3: #2b303a;
+  --line: #323845; --text: #dfe5ee; --muted: #8f99a8; --steel: #aab4c4;
+  --accent: #ffb31f; --lava: #ff7a18; --red: #e8442e; --blue: #2e9fe8; --ok: #57d96b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 18px 14px 60px; color: var(--text);
+  font-family: "Noto Sans TC", system-ui, sans-serif;
+  background:
+    radial-gradient(900px 480px at 50% -120px, rgba(255,122,24,.1), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(170,180,196,.03) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(60deg, rgba(170,180,196,.022) 0 1px, transparent 1px 42px),
+    var(--bg);
+  touch-action: manipulation;
+}
+main, header, .console { max-width: 920px; margin: 0 auto; }
+h1 {
+  margin: 0 0 4px; font-size: 26px; letter-spacing: .14em; font-weight: 800;
+  color: var(--accent); text-transform: uppercase;
+}
+h1 small { font-size: 14px; color: var(--steel); letter-spacing: .3em; margin-left: 10px; }
+.hint { margin: 0 0 16px; color: var(--muted); font-size: 13px; letter-spacing: .04em; }
+.hazard { height: 5px; margin: 14px auto; max-width: 920px;
+  background: repeating-linear-gradient(-45deg, var(--accent) 0 9px, #14161b 9px 18px); opacity: .7; }
+
+/* 控制台 */
+.console {
+  position: sticky; top: 8px; z-index: 5;
+  background: linear-gradient(180deg, #272c36, var(--panel) 42%, #14161c);
+  border: 1px solid var(--line); padding: 12px 14px;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  box-shadow: 0 10px 22px rgba(0,0,0,.55);
+}
+.ctl { display: grid; grid-template-columns: 110px 1fr 52px; gap: 10px; align-items: center; margin: 6px 0; }
+.ctl label { font-size: 12px; letter-spacing: .16em; color: var(--accent); font-weight: 700; text-transform: uppercase; }
+.ctl label em { display: block; font-style: normal; color: var(--muted); font-weight: 400; letter-spacing: .02em; font-size: 11px; }
+.ctl output { font-variant-numeric: tabular-nums; color: var(--text); font-size: 13px; text-align: right; }
+input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
+.meter-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.meter { flex: 1; height: 8px; background: #0b0d12; border: 1px solid var(--line); position: relative; overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0%; background: linear-gradient(90deg, var(--ok), var(--accent) 70%, var(--red)); }
+.meter i.hot { background: var(--red); }
+.meter-row .pv { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meter-row button { min-height: 24px; padding: 2px 10px; font-size: 11px; }
+#snapshot { margin-top: 6px; font-size: 12px; color: var(--steel); letter-spacing: .06em; font-variant-numeric: tabular-nums; }
+#snapshot b { color: var(--accent); }
+
+/* 引擎卡 */
+.engine {
+  margin: 14px auto; padding: 14px; border: 1px solid var(--line);
+  background: linear-gradient(180deg, #22262e, var(--panel) 50%, #15181e);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+.ehead { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+.etag {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center;
+  font-size: 20px; font-weight: 800; color: #1a0d02;
+  background: linear-gradient(180deg, #ffc954, var(--accent) 45%, var(--lava));
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.ehead h2 { margin: 0; font-size: 16px; letter-spacing: .1em; }
+.ehead p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.badge {
+  margin-left: 8px; padding: 2px 8px; font-size: 11px; letter-spacing: .1em;
+  color: var(--steel); border: 1px solid rgba(170,180,196,.4); background: rgba(170,180,196,.08);
+}
+.badge.warn { color: var(--red); border-color: rgba(232,68,46,.5); background: rgba(232,68,46,.08); }
+.badge.ok { color: var(--ok); border-color: rgba(87,217,107,.5); background: rgba(87,217,107,.08); }
+.erow { display: flex; flex-wrap: wrap; gap: 8px; }
+.erow button, .meter-row button {
+  border: 0; cursor: pointer; min-height: 40px; padding: 8px 16px;
+  font: 700 14px/1 "Noto Sans TC", system-ui, sans-serif; letter-spacing: .1em; color: var(--text);
+  background: linear-gradient(180deg, #3c434f, #23272f 55%, #181b21);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), inset 0 -3px 5px rgba(0,0,0,.6);
+  -webkit-tap-highlight-color: transparent;
+}
+.erow button:hover { color: var(--accent); }
+.erow button:active:not(:disabled) { transform: translateY(2px); }
+.erow button.hot { color: #ffe6e0; background: linear-gradient(180deg, #ff7a64, var(--red) 42%, #8a1d10); }
+.erow button.hot:hover { color: #fff; }
+.erow button.rapid { color: #1a0d02; background: linear-gradient(180deg, #ffc954, var(--accent) 40%, var(--lava) 88%, #c9540c); }
+.erow button.rapid.on { background: linear-gradient(180deg, #fff3d6, #ffc954 40%, var(--lava)); animation: blink .5s infinite alternate; }
+@keyframes blink { from { filter: brightness(1); } to { filter: brightness(1.35); } }
+.erow button.shared { color: var(--muted); background: linear-gradient(180deg, #2b303a, #1d2128 55%, #14171d); }
+.erow button.shared:hover { color: var(--steel); }
+.erow button:disabled {
+  cursor: not-allowed; color: #4c5564;
+  background: repeating-linear-gradient(45deg, #171a20 0 8px, #13161b 8px 16px);
+  box-shadow: inset 0 0 0 1px rgba(76,85,100,.3); transform: none;
+}
+.foot { max-width: 920px; margin: 18px auto 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.foot b { color: var(--steel); }
+</style>
+</head>
+<body>
+<header>
+  <h1>SFX LAB<small>金屬陀螺打擊感試聽室</small></h1>
+  <p class="hint">點按鈕試聽 → 回報引擎代號＋滑桿值（可混搭：例如 A 的撞擊 + B 的 KO）</p>
+</header>
+
+<section class="console">
+  <div class="ctl"><label>Volume<em>主響度</em></label><input id="sl-vol" type="range" min="0" max="1" step="0.01" value="0.8"><output id="val-vol">0.80</output></div>
+  <div class="ctl"><label>Crunch<em>失真量</em></label><input id="sl-crunch" type="range" min="0" max="1" step="0.01" value="0.5"><output id="val-crunch">0.50</output></div>
+  <div class="ctl"><label>Ring<em>金屬餘響</em></label><input id="sl-ring" type="range" min="0" max="1" step="0.01" value="0.5"><output id="val-ring">0.50</output></div>
+  <div class="ctl"><label>Sub<em>低頻量</em></label><input id="sl-sub" type="range" min="0" max="1" step="0.01" value="0.6"><output id="val-sub">0.60</output></div>
+  <div class="meter-row">
+    <div class="meter"><i id="meterBar"></i></div>
+    <span class="pv" id="peakVal">峰值保持 0.000</span>
+    <button id="peakReset" type="button">歸零</button>
+  </div>
+  <div id="snapshot"></div>
+</section>
+
+<main>
+  <section class="engine" data-engine="A">
+    <div class="ehead"><span class="etag">A</span><div>
+      <h2>鋼鐵重擊</h2>
+      <p>FM 非諧泛音簇（金屬體鳴）× WaveShaper 失真 × sub drop 50→28Hz × 超短 transient —— 狠、硬、快</p>
+    </div></div>
+    <div class="erow">
+      <button data-act="l">輕撞</button><button data-act="m">中撞</button><button data-act="h" class="hot">重撞</button>
+      <button data-act="rapid" class="rapid">連續亂打</button><button data-act="ko" class="hot">KO</button>
+      <button data-act="out" class="shared" title="五套共用同一設計">出界</button>
+      <button data-act="launch" class="shared" title="五套共用同一設計">發射</button>
+    </div>
+  </section>
+
+  <section class="engine" data-engine="B">
+    <div class="ehead"><span class="etag">B</span><div>
+      <h2>電影爆響</h2>
+      <p>多層 noise burst（bandpass 掃頻）× 程序化金屬 IR 卷積餘響 × 50Hz sub boom × soft-clip —— 厚、有空間感</p>
+    </div></div>
+    <div class="erow">
+      <button data-act="l">輕撞</button><button data-act="m">中撞</button><button data-act="h" class="hot">重撞</button>
+      <button data-act="rapid" class="rapid">連續亂打</button><button data-act="ko" class="hot">KO</button>
+      <button data-act="out" class="shared" title="五套共用同一設計">出界</button>
+      <button data-act="launch" class="shared" title="五套共用同一設計">發射</button>
+    </div>
+  </section>
+
+  <section class="engine" data-engine="C">
+    <div class="ehead"><span class="etag">C</span><div>
+      <h2>街機誇張</h2>
+      <p>量化 WaveShaper bitcrush × 方波堆疊急速 pitch-drop × 重壓縮 pump —— 誇張、復古、爽</p>
+    </div></div>
+    <div class="erow">
+      <button data-act="l">輕撞</button><button data-act="m">中撞</button><button data-act="h" class="hot">重撞</button>
+      <button data-act="rapid" class="rapid">連續亂打</button><button data-act="ko" class="hot">KO</button>
+      <button data-act="out" class="shared" title="五套共用同一設計">出界</button>
+      <button data-act="launch" class="shared" title="五套共用同一設計">發射</button>
+    </div>
+  </section>
+
+  <section class="engine" data-engine="D">
+    <div class="ehead"><span class="etag">D</span><div>
+      <h2>取樣混血<span class="badge" id="dStatus">取樣載入中…</span></h2>
+      <p>R2 取樣當「皮」× A 的失真 bus + sub 當「骨」—— 真實質感疊合成重量</p>
+    </div></div>
+    <div class="erow">
+      <button data-act="l" data-need="hit">輕撞</button><button data-act="m" data-need="hit">中撞</button>
+      <button data-act="h" class="hot" data-need="hit">重撞</button>
+      <button data-act="rapid" class="rapid" data-need="hit">連續亂打</button>
+      <button data-act="ko" class="hot" data-need="ko">KO</button>
+      <button data-act="out" class="shared" title="五套共用同一設計">出界</button>
+      <button data-act="launch" class="shared" title="五套共用同一設計">發射</button>
+    </div>
+  </section>
+
+  <section class="engine" data-engine="E">
+    <div class="ehead"><span class="etag">E</span><div>
+      <h2>現役對照<span class="badge">baseline</span></h2>
+      <p>照抄 src/audio/sfx.ts 目前的 playCollision / playKO 合成路徑（取樣兜底版）—— 現況基準</p>
+    </div></div>
+    <div class="erow">
+      <button data-act="l">輕撞</button><button data-act="m">中撞</button><button data-act="h" class="hot">重撞</button>
+      <button data-act="rapid" class="rapid">連續亂打</button><button data-act="ko" class="hot">KO</button>
+      <button data-act="out" class="shared" title="五套共用同一設計">出界</button>
+      <button data-act="launch" class="shared" title="五套共用同一設計">發射</button>
+    </div>
+  </section>
+</main>
+
+<div class="hazard"></div>
+<p class="foot">
+  <b>出界 / 發射</b>為五套共用設計（灰鍵）。<b>連續亂打</b>＝3 秒隨機力道、隨機間隔 60~200ms（模擬實戰密度，再按一次可停止）。
+  所有路徑經共用響度鏈：compressor → makeup → 硬 limiter → soft-clip 保險，峰值表超過 0.95 變紅。
+  回報格式範例：「A 撞擊 + B KO，crunch 0.70 / ring 0.45 / sub 0.80」。
+</p>
+
+<script>
+'use strict';
+/* ================================================================
+   SFX LAB — 五套引擎共用骨架
+   結構：engines = { A:{hit(s),ko()}, B:..., C:..., D:..., E:... }
+   全部走共用響度鏈：volume → compressor(拉響度) → makeup → 硬 limiter
+   → soft-clip 保險 → analyser → destination。
+   三根個性滑桿（crunch/ring/sub）在每次觸發時讀取 + 持續節點即時更新。
+   ================================================================ */
+
+/* ---- 全域滑桿值 ---- */
+const GLOBALS = { volume: 0.8, crunch: 0.5, ring: 0.5, sub: 0.6 };
+
+/* ---- 共用響度鏈參數（之後移植 sfx.ts 用） ---- */
+const MASTER_PARAMS = {
+  comp:    { threshold: -20, knee: 12, ratio: 4, attack: 0.004, release: 0.2 }, // 拉響度
+  makeup:  1.8,                                                                  // 補償增益（約 +5dB）
+  limiter: { threshold: -1.5, knee: 0, ratio: 20, attack: 0.001, release: 0.06 },// 硬限幅
+  safetyK: 2.2, safetyCeil: 0.985,                                               // 最終 tanh soft-clip 保險
+};
+
+let ctx = null, noiseBuf = null;
+const M = {};    // 響度鏈節點
+const bus = {};  // 各引擎匯流排
+let conv = null, bWet = null, bSoft = null;   // B：卷積 / wet / soft-clip
+let cCrush = null, cComp = null;              // C：bitcrusher / pump compressor
+
+function qs(sel) { return document.querySelector(sel); }
+function jit(pct) { return 1 + (Math.random() * 2 - 1) * pct; }
+function now() { return ctx.currentTime; }
+
+/* 指數衰減包絡：0 → peak（attack）→ 0.0001（dur） */
+function env(g, t, peak, dur, attack) {
+  const a = attack === undefined ? 0.003 : attack;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(Math.max(0.0002, peak), t + a);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(a + 0.005, dur));
+}
+
+/* 單音（可滑頻） */
+function toneAt(dest, t, dur, peak, type, f0, f1, attack) {
+  const o = ctx.createOscillator(); o.type = type;
+  o.frequency.setValueAtTime(Math.max(1, f0), t);
+  if (f1) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+  const g = ctx.createGain(); env(g, t, peak, dur, attack);
+  o.connect(g); g.connect(dest);
+  o.start(t); o.stop(t + dur + 0.06);
+}
+
+/* 噪音爆（隨機 offset 取樣白噪 → 連發不重複） */
+function burstNoise(dest, t, dur, peak, type, f0, f1, q) {
+  const src = ctx.createBufferSource(); src.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = type; f.Q.value = q === undefined ? 0.9 : q;
+  f.frequency.setValueAtTime(Math.max(20, f0), t);
+  if (f1) f.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+  const g = ctx.createGain(); env(g, t, peak, dur, 0.002);
+  src.connect(f); f.connect(g); g.connect(dest);
+  src.start(t, Math.random() * 1.2, dur + 0.12);
+}
+
+/* 失真曲線快取（tanh 軟硬可調；bitcrush 量化曲線） */
+const curveCache = new Map();
+function tanhCurve(drive) { // drive 0..1 → k = 1.5..47.5
+  const key = 't' + Math.round(drive * 24);
+  if (curveCache.has(key)) return curveCache.get(key);
+  const k = 1.5 + drive * 46, n = 2048, c = new Float32Array(n), norm = Math.tanh(k);
+  for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / norm; }
+  curveCache.set(key, c); return c;
+}
+function crushCurve(steps) { // 量化階數越少越髒
+  const key = 'c' + steps;
+  if (curveCache.has(key)) return curveCache.get(key);
+  const n = 4096, c = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.round(x * steps) / steps; }
+  curveCache.set(key, c); return c;
+}
+function makeDist(drive) {
+  const ws = ctx.createWaveShaper(); ws.curve = tanhCurve(drive); ws.oversample = '4x'; return ws;
+}
+/* ================================================================
+   AudioContext 與共用響度鏈（首次手勢時建立；iOS 走 pointerdown 解鎖）
+   ================================================================ */
+function ensureCtx() {
+  if (ctx) return ctx;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  ctx = new AC();
+
+  /* volume → comp → makeup → limiter → safety → analyser → out */
+  M.input = ctx.createGain(); M.input.gain.value = GLOBALS.volume;
+  M.comp = ctx.createDynamicsCompressor();
+  M.comp.threshold.value = MASTER_PARAMS.comp.threshold;
+  M.comp.knee.value = MASTER_PARAMS.comp.knee;
+  M.comp.ratio.value = MASTER_PARAMS.comp.ratio;
+  M.comp.attack.value = MASTER_PARAMS.comp.attack;
+  M.comp.release.value = MASTER_PARAMS.comp.release;
+  M.makeup = ctx.createGain(); M.makeup.gain.value = MASTER_PARAMS.makeup;
+  M.limiter = ctx.createDynamicsCompressor();
+  M.limiter.threshold.value = MASTER_PARAMS.limiter.threshold;
+  M.limiter.knee.value = MASTER_PARAMS.limiter.knee;
+  M.limiter.ratio.value = MASTER_PARAMS.limiter.ratio;
+  M.limiter.attack.value = MASTER_PARAMS.limiter.attack;
+  M.limiter.release.value = MASTER_PARAMS.limiter.release;
+  M.safety = ctx.createWaveShaper(); M.safety.oversample = '2x';
+  { const n = 2048, c = new Float32Array(n), k = MASTER_PARAMS.safetyK, norm = Math.tanh(k);
+    for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / norm * MASTER_PARAMS.safetyCeil; }
+    M.safety.curve = c; }
+  M.analyser = ctx.createAnalyser(); M.analyser.fftSize = 2048;
+  M.input.connect(M.comp); M.comp.connect(M.makeup); M.makeup.connect(M.limiter);
+  M.limiter.connect(M.safety); M.safety.connect(M.analyser); M.analyser.connect(ctx.destination);
+
+  /* 2 秒共用白噪 */
+  const n = Math.floor(ctx.sampleRate * 2);
+  noiseBuf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+
+  /* 引擎匯流排：A / D / E / S(共用出界發射) 直入 master */
+  bus.A = ctx.createGain(); bus.A.gain.value = 0.9;  bus.A.connect(M.input);
+  bus.D = ctx.createGain(); bus.D.gain.value = 0.95; bus.D.connect(M.input);
+  bus.E = ctx.createGain(); bus.E.gain.value = E_PARAMS.trim; bus.E.connect(M.input);
+  bus.S = ctx.createGain(); bus.S.gain.value = 0.9;  bus.S.connect(M.input);
+
+  /* B：dry → soft-clip → trim；send → convolver(程序化金屬IR) → wet → soft-clip */
+  bus.Btrim = ctx.createGain(); bus.Btrim.gain.value = 0.95; bus.Btrim.connect(M.input);
+  bSoft = ctx.createWaveShaper(); bSoft.oversample = '2x'; bSoft.connect(bus.Btrim);
+  bus.Bdry = ctx.createGain(); bus.Bdry.connect(bSoft);
+  conv = ctx.createConvolver();
+  bWet = ctx.createGain();
+  bus.Bsend = ctx.createGain(); bus.Bsend.connect(conv); conv.connect(bWet); bWet.connect(bSoft);
+
+  /* C：crusher → pump comp → makeup → master；sub 直入 comp（吃 pump、不被量化） */
+  cComp = ctx.createDynamicsCompressor();
+  cComp.threshold.value = C_PARAMS.comp.threshold;
+  cComp.knee.value = C_PARAMS.comp.knee;
+  cComp.ratio.value = C_PARAMS.comp.ratio;
+  cComp.attack.value = C_PARAMS.comp.attack;
+  cComp.release.value = C_PARAMS.comp.release;
+  const cMake = ctx.createGain(); cMake.gain.value = C_PARAMS.comp.makeup;
+  cComp.connect(cMake); cMake.connect(M.input);
+  cCrush = ctx.createWaveShaper(); cCrush.oversample = 'none'; cCrush.connect(cComp);
+
+  applyGlobalsToNodes();
+  buildIR();
+  decodeSamples();
+  startMeter();
+  return ctx;
+}
+
+function unlock() {
+  if (!ensureCtx()) return;
+  if (ctx.state === 'suspended') ctx.resume();
+}
+
+/* ================================================================
+   引擎 A：鋼鐵重擊
+   FM 非諧泛音簇（鐘體比 1/2.76/5.40/8.93 + 非整數 FM 比 3.51 → 金屬
+   sideband）→ tanh 失真（crunch）；transient 與 sub 直通保銳利/乾淨。
+   ================================================================ */
+const A_PARAMS = {
+  partials: [1, 2.76, 5.40, 8.93], // 鐘體非諧泛音比（金屬體鳴）
+  partialAmp: 0.62,                // 每階泛音音量遞減
+  fmRatio: 3.51,                   // FM modulator 比（非整數 → 金屬 sideband）
+  f0Base: 168, f0Span: 220,        // 基頻 = base + span * 力道
+  bodyGain: 0.5,                   // 體鳴層進失真前音量
+  driveBase: 0.3, driveSpan: 0.65, // 失真 drive = base + span * crunch
+  distOut: 0.65,                   // 失真後補償（失真拉高 RMS）
+  subF0: 52, subF1: 28,            // sub drop 50→28Hz
+  subGain: 0.85, subDur: 0.22,
+};
+
+const engineA = {
+  /* 一次體鳴敲擊（hit/ko 共用）：s=力道 f0=基頻 ringMul=餘響倍率 */
+  strike(t, s, f0, ringMul) {
+    const P = A_PARAMS, G = GLOBALS;
+    const dist = makeDist(P.driveBase + P.driveSpan * G.crunch);
+    const out = ctx.createGain(); out.gain.value = P.distOut;
+    dist.connect(out); out.connect(bus.A);
+    /* FM modulator：index 隨力道與 crunch 增、90ms 內塌掉（攻擊瞬間最髒） */
+    const mod = ctx.createOscillator(); mod.type = 'sine'; mod.frequency.value = f0 * P.fmRatio;
+    const mg = ctx.createGain();
+    const idx = f0 * (1.0 + 2.2 * s + 1.8 * G.crunch);
+    mg.gain.setValueAtTime(idx, t);
+    mg.gain.exponentialRampToValueAtTime(Math.max(1, idx * 0.04), t + 0.09);
+    mod.connect(mg);
+    const ringDur = (0.07 + 0.3 * G.ring) * (0.6 + 0.8 * s) * ringMul;
+    P.partials.forEach((r, i) => {
+      const o = ctx.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(f0 * r * jit(0.012), t);
+      mg.connect(o.frequency);
+      const g = ctx.createGain();
+      const amp = P.bodyGain * (0.35 + 0.65 * s) * Math.pow(P.partialAmp, i);
+      const dur = Math.max(0.03, ringDur * (1 - i * 0.15));
+      env(g, t, amp, dur);
+      o.connect(g); g.connect(dist);
+      o.start(t); o.stop(t + dur + 0.06);
+    });
+    mod.start(t); mod.stop(t + ringDur + 0.12);
+  },
+  hit(s) {
+    if (!ensureCtx()) return;
+    const P = A_PARAMS, t = now() + 0.001 + Math.random() * 0.005;
+    this.strike(t, s, (P.f0Base + P.f0Span * s) * jit(0.06), 1);
+    burstNoise(bus.A, t, 0.004 + 0.004 * s, 0.3 + 0.45 * s, 'highpass', 5200);   // 超短 transient「嚓」
+    toneAt(bus.A, t, P.subDur + 0.08 * s, (0.4 + 0.6 * s) * GLOBALS.sub * P.subGain, 'sine', P.subF0 + 10 * s, P.subF1); // sub drop
+  },
+  ko() {
+    if (!ensureCtx()) return;
+    const t = now() + 0.002;
+    this.strike(t, 1.0, 96, 1.6);           // 主擊（低基頻 → 巨物感）
+    this.strike(t + 0.055, 0.8, 72, 2.2);   // 二段碎裂（更低 + 長尾）
+    burstNoise(bus.A, t, 0.05, 0.6, 'highpass', 3000);       // 起爆裂響
+    burstNoise(bus.A, t, 0.4, 0.7, 'lowpass', 2200, 140);    // 爆炸主體
+    toneAt(bus.A, t, 0.55, 1.1 * GLOBALS.sub, 'sine', 62, 24);          // 沉底 sub
+    toneAt(bus.A, t + 0.06, 0.5, 0.5 * GLOBALS.sub, 'triangle', 44, 22); // 第二層 rumble
+  },
+};
+
+/* ================================================================
+   引擎 B：電影爆響
+   多層 noise burst（bandpass 掃頻）+ 程序化金屬 IR（衰減噪音 + 非諧
+   模態正弦）卷積餘響 + 50Hz sub boom；整個 bus 過 soft-clip 黏合。
+   ================================================================ */
+const B_PARAMS = {
+  irModes: [641, 1209, 2034, 3157, 4519], // IR 金屬模態頻率（非諧）
+  irDurBase: 0.4, irDurSpan: 1.5,         // IR 長度 = base + span * ring
+  irNoiseTau: 0.08, irNoiseTauSpan: 0.3,  // IR 噪音衰減 τ
+  wetBase: 0.25, wetSpan: 0.9,            // 卷積 wet = base + span * ring
+  softBase: 0.1, softSpan: 0.32,          // soft-clip drive = base + span * crunch
+  layers: [ /* {延遲, 長度, 音量, 濾波, f0, f1, 進IR量} —— 撞擊三層 */
+    { dl: 0,     dur: 0.09, peak: 0.55, type: 'bandpass', f0: 2600, f1: 520, send: 0.8 },
+    { dl: 0.008, dur: 0.15, peak: 0.42, type: 'bandpass', f0: 1150, f1: 300, send: 0.9 },
+    { dl: 0,     dur: 0.03, peak: 0.35, type: 'highpass', f0: 4200, f1: 0,   send: 0.6 },
+  ],
+  subF0: 54, subF1: 34, subGain: 0.95,
+};
+
+/* 程序化 IR：指數衰減白噪 + 非諧金屬模態（雙聲道微 detune → 立體寬度） */
+function buildIR() {
+  if (!ctx) return;
+  const P = B_PARAMS, ring = GLOBALS.ring;
+  const dur = P.irDurBase + P.irDurSpan * ring;
+  const sr = ctx.sampleRate, len = Math.max(64, Math.floor(sr * dur));
+  const buf = ctx.createBuffer(2, len, sr);
+  const nTau = P.irNoiseTau + P.irNoiseTauSpan * ring;
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    const phases = P.irModes.map(() => Math.random() * 6.28318);
+    const det = P.irModes.map(() => 1 + (Math.random() * 2 - 1) * 0.012);
+    for (let i = 0; i < len; i++) {
+      const t = i / sr;
+      let v = (Math.random() * 2 - 1) * Math.exp(-t / nTau) * 0.7;
+      for (let m = 0; m < P.irModes.length; m++) {
+        v += Math.sin(6.28318 * P.irModes[m] * det[m] * t + phases[m])
+           * Math.exp(-t / (nTau * 1.8 + 0.05)) * (0.18 / (1 + m * 0.7));
+      }
+      d[i] = v;
+    }
+  }
+  conv.buffer = buf; // normalize=true（預設）會自動校正能量
+}
+
+/* B 專用噪音層：同時寫 dry 與 IR send */
+function bNoise(t, dur, peak, type, f0, f1, send) {
+  const src = ctx.createBufferSource(); src.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = type; f.Q.value = 0.9;
+  f.frequency.setValueAtTime(Math.max(20, f0), t);
+  if (f1) f.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+  const g = ctx.createGain(); env(g, t, peak, dur, 0.002);
+  src.connect(f); f.connect(g);
+  g.connect(bus.Bdry);
+  const sg = ctx.createGain(); sg.gain.value = send;
+  g.connect(sg); sg.connect(bus.Bsend);
+  src.start(t, Math.random() * 1.2, dur + 0.12);
+}
+
+const engineB = {
+  hit(s) {
+    if (!ensureCtx()) return;
+    const P = B_PARAMS, t = now() + 0.001 + Math.random() * 0.005;
+    const br = 0.55 + 0.6 * s; // 亮度隨力道
+    for (const L of P.layers) {
+      bNoise(t + L.dl, L.dur + 0.05 * s, L.peak * (0.4 + 0.75 * s), L.type, L.f0 * br, L.f1 ? L.f1 : 0, L.send);
+    }
+    /* 50Hz sub boom（只走 dry，進 IR 會糊） */
+    toneAt(bus.Bdry, t, 0.24 + 0.1 * s, (0.35 + 0.6 * s) * GLOBALS.sub * P.subGain, 'sine', P.subF0 + 8 * s, P.subF1);
+  },
+  ko() {
+    if (!ensureCtx()) return;
+    const t = now() + 0.002;
+    bNoise(t, 0.05, 0.55, 'highpass', 3500, 0, 1.0);    // 起爆裂
+    bNoise(t, 0.55, 0.85, 'lowpass', 2400, 90, 1.1);    // 爆炸主體（大量送 IR → 長尾）
+    bNoise(t + 0.02, 0.3, 0.4, 'bandpass', 900, 180, 1.2);
+    toneAt(bus.Bdry, t, 0.5, 1.05 * GLOBALS.sub, 'sine', 58, 30);
+    toneAt(bus.Bdry, t + 0.07, 0.45, 0.5 * GLOBALS.sub, 'triangle', 42, 24);
+  },
+};
+/* ================================================================
+   引擎 C：街機誇張
+   方波堆疊急速 pitch-drop → 量化 WaveShaper（bitcrush）→ 重壓縮
+   （threshold -34 / ratio 18 / release 0.2 → pump 感）；方波 sub
+   低通 140Hz 取「塊」、繞過 crusher 直入 comp 一起被 pump。
+   ================================================================ */
+const C_PARAMS = {
+  crushBase: 26, crushSpan: 20,      // 量化階數 = base - span*crunch（26→6，越少越髒）
+  detunes: [-25, 0, 18],             // 方波堆疊 detune（cents）
+  dropF0: 620, dropSpan: 780,        // 起始頻率 = f0 + span*力道
+  dropTo: 74, dropTime: 0.06,        // 急速 pitch-drop 目標/時間
+  sqGain: 0.16,                      // 單支方波音量（×3 支）
+  subF0: 62, subF1: 36, subGain: 1.0,
+  comp: { threshold: -34, knee: 0, ratio: 18, attack: 0.001, release: 0.2, makeup: 2.3 }, // pump
+};
+
+const engineC = {
+  hit(s) {
+    if (!ensureCtx()) return;
+    const P = C_PARAMS, t = now() + 0.001 + Math.random() * 0.004;
+    const fStart = (P.dropF0 + P.dropSpan * s) * jit(0.07);
+    const dropT = P.dropTime + 0.035 * s;
+    const dur = 0.1 + 0.1 * s;
+    for (const dt of P.detunes) {
+      const o = ctx.createOscillator(); o.type = 'square'; o.detune.value = dt;
+      o.frequency.setValueAtTime(fStart, t);
+      o.frequency.exponentialRampToValueAtTime(P.dropTo + 50 * s, t + dropT);
+      const g = ctx.createGain(); env(g, t, P.sqGain * (0.4 + 0.6 * s), dur, 0.002);
+      o.connect(g); g.connect(cCrush);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+    burstNoise(cCrush, t, 0.07 + 0.05 * s, 0.25 + 0.35 * s, 'bandpass', 1900, 320); // 髒噪（也被量化）
+    /* 方波 sub「塊」：lowpass 140 取塊感，走 comp 吃 pump */
+    const o = ctx.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(P.subF0 + 10 * s, t);
+    o.frequency.exponentialRampToValueAtTime(P.subF1, t + 0.16);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 140;
+    const g = ctx.createGain(); env(g, t, (0.5 + 0.6 * s) * GLOBALS.sub * P.subGain, 0.18 + 0.06 * s);
+    o.connect(lp); lp.connect(g); g.connect(cComp);
+    o.start(t); o.stop(t + 0.32);
+  },
+  ko() {
+    if (!ensureCtx()) return;
+    const t = now() + 0.002;
+    /* 長落體：saw + 雙 detune 方波 1500→36（半秒） */
+    const stack = [['sawtooth', 0], ['square', -30], ['square', 25]];
+    for (const [ty, dt] of stack) {
+      const o = ctx.createOscillator(); o.type = ty; o.detune.value = dt;
+      o.frequency.setValueAtTime(1500 * jit(0.05), t);
+      o.frequency.exponentialRampToValueAtTime(36, t + 0.42);
+      const g = ctx.createGain(); env(g, t, 0.2, 0.55, 0.003);
+      o.connect(g); g.connect(cCrush);
+      o.start(t); o.stop(t + 0.65);
+    }
+    burstNoise(cCrush, t, 0.5, 0.65, 'lowpass', 2600, 90);   // 爆炸（被量化 → 街機髒）
+    burstNoise(cCrush, t, 0.04, 0.5, 'highpass', 3000);      // 起爆嚓
+    const o = ctx.createOscillator(); o.type = 'square';     // sub 大塊
+    o.frequency.setValueAtTime(70, t);
+    o.frequency.exponentialRampToValueAtTime(30, t + 0.5);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 140;
+    const g = ctx.createGain(); env(g, t, 1.2 * GLOBALS.sub, 0.55);
+    o.connect(lp); lp.connect(g); g.connect(cComp);
+    o.start(t); o.stop(t + 0.65);
+  },
+};
+
+/* ================================================================
+   引擎 D：取樣混血
+   R2 取樣（/api/sfx/*.wav）當「皮」→ dry + tanh 失真平行混合（crunch）；
+   合成「骨」＝A 的 sub drop + 強撞 transient（取樣未到也有基底）。
+   ================================================================ */
+const D_PARAMS = {
+  rateJit: 0.09,                    // 變速 ±9% 防重複感
+  rateWeight: 0.12,                 // 力道越重 rate 越低（1.06 - 0.12*s → 重=沉）
+  gainBase: 0.5, gainSpan: 0.55,
+  dryMix: 0.7,                      // 平行失真：dry 固定
+  wetBase: 0.3, wetSpan: 0.65,      // wet = base + span*crunch
+  driveBase: 0.3, driveSpan: 0.6,
+  subF0: 50, subF1: 30, subGain: 0.8,
+};
+
+const SAMPLE_SETS = {
+  hitL: ['hit-l-0', 'hit-l-1', 'hit-l-2', 'hit-l-3', 'hit-l-4'],
+  hitM: ['hit-m-0', 'hit-m-1', 'hit-m-2', 'hit-m-3', 'hit-m-4'],
+  hitH: ['hit-h-0', 'hit-h-1', 'hit-h-2', 'hit-h-3', 'hit-h-4'],
+  ko:   ['ko-0', 'ko-1', 'ko-2', 'ko-3', 'ko-4'],
+};
+const ALL_SAMPLES = Object.values(SAMPLE_SETS).flat();
+const sampleAB = new Map();   // name → ArrayBuffer（解碼前暫存）
+const sampleBufs = new Map(); // name → AudioBuffer
+const lastPick = {};
+let fetchDone = 0;
+const fetchedBySet = { hitL: 0, hitM: 0, hitH: 0, ko: 0 };
+
+/* 頁面載入即抓檔（fetch 不需手勢）；解碼等 AudioContext 建立後 */
+for (const [setName, names] of Object.entries(SAMPLE_SETS)) {
+  for (const n of names) {
+    fetch('/api/sfx/' + n + '.wav')
+      .then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(ab => { sampleAB.set(n, ab); fetchedBySet[setName]++; })
+      .catch(() => {})
+      .finally(() => { fetchDone++; updateDStatus(); if (ctx) decodeSamples(); });
+  }
+}
+function decodeSamples() {
+  for (const [n, ab] of Array.from(sampleAB)) {
+    sampleAB.delete(n);
+    ctx.decodeAudioData(ab, buf => { sampleBufs.set(n, buf); }, () => {});
+  }
+}
+function updateDStatus() {
+  const el = qs('#dStatus');
+  const total = fetchedBySet.hitL + fetchedBySet.hitM + fetchedBySet.hitH + fetchedBySet.ko;
+  if (fetchDone < ALL_SAMPLES.length) { el.textContent = '取樣載入中 ' + fetchDone + '/' + ALL_SAMPLES.length; return; }
+  const hitOK = (fetchedBySet.hitL + fetchedBySet.hitM + fetchedBySet.hitH) > 0;
+  const koOK = fetchedBySet.ko > 0;
+  if (total === 0) { el.textContent = '取樣未載入'; el.className = 'badge warn'; }
+  else { el.textContent = '取樣 ' + total + '/' + ALL_SAMPLES.length; el.className = 'badge ok'; }
+  document.querySelectorAll('[data-engine="D"] [data-need="hit"]').forEach(b => { b.disabled = !hitOK; });
+  document.querySelectorAll('[data-engine="D"] [data-need="ko"]').forEach(b => { b.disabled = !koOK; });
+}
+/* round-robin 取一顆可用取樣（不連發同一變體） */
+function pickSample(setName) {
+  const names = SAMPLE_SETS[setName];
+  const avail = names.map((n, i) => ({ n, i })).filter(x => sampleBufs.has(x.n));
+  if (!avail.length) return null;
+  let pick = avail[Math.floor(Math.random() * avail.length)];
+  if (avail.length > 1 && pick.i === lastPick[setName]) pick = avail[(avail.indexOf(pick) + 1) % avail.length];
+  lastPick[setName] = pick.i;
+  return sampleBufs.get(pick.n);
+}
+/* 取樣 → dry + 失真平行 → bus.D */
+function playSkin(buf, t, gain, rate) {
+  const P = D_PARAMS;
+  const src = ctx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
+  const g = ctx.createGain(); g.gain.value = gain;
+  src.connect(g);
+  const dry = ctx.createGain(); dry.gain.value = P.dryMix;
+  g.connect(dry); dry.connect(bus.D);
+  const ws = makeDist(P.driveBase + P.driveSpan * GLOBALS.crunch);
+  const wet = ctx.createGain(); wet.gain.value = P.wetBase + P.wetSpan * GLOBALS.crunch;
+  g.connect(ws); ws.connect(wet); wet.connect(bus.D);
+  src.start(t);
+}
+
+const engineD = {
+  hit(s) {
+    if (!ensureCtx()) return;
+    const P = D_PARAMS, t = now() + 0.002;
+    /* 骨：sub drop + 強撞 transient */
+    toneAt(bus.D, t, 0.16 + 0.1 * s, (0.35 + 0.55 * s) * GLOBALS.sub * P.subGain, 'sine', P.subF0 + 12 * s, P.subF1);
+    if (s > 0.45) burstNoise(bus.D, t, 0.006, 0.22 + 0.3 * (s - 0.45), 'highpass', 5600);
+    /* 皮：取樣（三檔力道 → 對應組） */
+    const buf = pickSample(s < 0.38 ? 'hitL' : s < 0.72 ? 'hitM' : 'hitH');
+    if (!buf) return;
+    playSkin(buf, t, P.gainBase + P.gainSpan * s, jit(P.rateJit) * (1.06 - P.rateWeight * s));
+  },
+  ko() {
+    if (!ensureCtx()) return;
+    const t = now() + 0.002;
+    const buf = pickSample('ko');
+    if (buf) playSkin(buf, t, 1.0, jit(0.06));
+    toneAt(bus.D, t, 0.5, 1.0 * GLOBALS.sub, 'sine', 56, 26);
+    toneAt(bus.D, t + 0.06, 0.45, 0.45 * GLOBALS.sub, 'triangle', 40, 24);
+    burstNoise(bus.D, t, 0.04, 0.4, 'highpass', 2800);
+  },
+};
+
+/* ================================================================
+   引擎 E：現役對照 —— 照抄 src/audio/sfx.ts 的合成路徑
+   （playCollision 合成兜底三層 + playKO 兜底；參數原樣，僅 dest 改 bus.E）
+   ================================================================ */
+const E_PARAMS = {
+  trim: 0.69, // 近似原版 in-game 相對響度（原 master 0.55 / 本頁預設 0.8）
+};
+function eTone(freq, dur, type, gain, slideTo, delay) {
+  const t = now() + (delay || 0);
+  const o = ctx.createOscillator(); const g = ctx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t + dur);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(gain, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(bus.E);
+  o.start(t); o.stop(t + dur + 0.03);
+}
+function eNoise(dur, gain, filter, freq, freqTo, delay) {
+  const t = now() + (delay || 0);
+  const src = ctx.createBufferSource(); src.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = filter;
+  f.frequency.setValueAtTime(freq, t);
+  if (freqTo) f.frequency.exponentialRampToValueAtTime(Math.max(40, freqTo), t + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f); f.connect(g); g.connect(bus.E);
+  src.start(t); src.stop(t + dur + 0.03);
+}
+const engineE = {
+  hit(s) { // = playCollision 合成兜底（s 即原碼的 impact/260）
+    if (!ensureCtx()) return;
+    const d = Math.random() * 0.008;
+    eTone((85 + 75 * s) * jit(0.06), 0.08 + 0.1 * s, 'sine', 0.16 + 0.3 * s, 38, d);                  // 低頻 thump
+    eNoise(0.045 + 0.085 * s, 0.14 + 0.24 * s, 'bandpass', (850 + 2700 * s) * jit(0.08), 420 + 700 * s, d); // 金屬 clank 噪
+    const f0 = (300 + 460 * s) * jit(0.05);
+    eTone(f0, 0.045 + 0.05 * s, 'square', 0.035 + 0.07 * s, f0 * 0.55, d + 0.002);                    // 方波鐘鳴
+    eTone(f0 * 2.76, 0.035 + 0.04 * s, 'square', 0.02 + 0.045 * s, undefined, d + 0.002);             // 非諧泛音
+    if (s > 0.25) eNoise(0.012 + 0.012 * s, 0.08 + 0.18 * (s - 0.25), 'highpass', (3600 + 3000 * s) * jit(0.1), undefined, d); // 高頻 transient
+  },
+  ko() { // = playKO 合成兜底
+    if (!ensureCtx()) return;
+    eNoise(0.04, 0.32, 'highpass', 2400);          // 起爆「嚓」
+    eNoise(0.55, 0.5, 'lowpass', 1900, 100);       // 爆炸主體
+    eTone(130, 0.6, 'sine', 0.38, 36);             // sub 落地 drop
+    eTone(58, 0.55, 'triangle', 0.2, 28, 0.06);    // 第二層 rumble
+  },
+};
+/* ================================================================
+   共用：出界 / 發射（五套引擎共用同一設計）
+   ================================================================ */
+const SHARED_PARAMS = {
+  launch: {
+    ratchet: { n: 3, gap: 0.022, dur: 0.008, gain: 0.16, f: 3200, fStep: 400 }, // 卡榫齒
+    rip: { f0: 150, f1: 980, dur: 0.24, gain: 0.4, drive: 0.35, out: 0.5 },     // 拉繩 saw + 輕失真
+    air: { dl: 0.04, dur: 0.18, gain: 0.25, f0: 1100, f1: 4200 },               // 抽繩風聲
+    snap: { dl: 0.24 },                                                          // 離手 snap + thump
+  },
+  ringOut: {
+    whoosh: { dur: 0.5, gain: 0.3, f0: 520, f1: 3900 },   // 上揚呼嘯
+    doppler: { f0: 330, f1: 1480, dur: 0.48, gain: 0.22 },
+  },
+};
+
+const shared = {
+  launch() {
+    if (!ensureCtx()) return;
+    const P = SHARED_PARAMS.launch, t = now() + 0.002;
+    for (let i = 0; i < P.ratchet.n; i++) {
+      burstNoise(bus.S, t + i * P.ratchet.gap, P.ratchet.dur, P.ratchet.gain + 0.06 * i, 'highpass', P.ratchet.f + P.ratchet.fStep * i);
+    }
+    const ws = makeDist(P.rip.drive);
+    const og = ctx.createGain(); og.gain.value = P.rip.out;
+    ws.connect(og); og.connect(bus.S);
+    const o = ctx.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(P.rip.f0 * jit(0.05), t + 0.03);
+    o.frequency.exponentialRampToValueAtTime(P.rip.f1, t + 0.03 + P.rip.dur);
+    const g = ctx.createGain(); env(g, t + 0.03, P.rip.gain, P.rip.dur, 0.01);
+    o.connect(g); g.connect(ws);
+    o.start(t + 0.03); o.stop(t + 0.03 + P.rip.dur + 0.08);
+    burstNoise(bus.S, t + P.air.dl, P.air.dur, P.air.gain, 'bandpass', P.air.f0, P.air.f1);
+    burstNoise(bus.S, t + P.snap.dl, 0.025, 0.35, 'bandpass', 2400);
+    toneAt(bus.S, t + P.snap.dl, 0.09, 0.15 + 0.3 * GLOBALS.sub, 'sine', 170, 70);
+  },
+  ringOut() {
+    if (!ensureCtx()) return;
+    const P = SHARED_PARAMS.ringOut, t = now() + 0.002;
+    burstNoise(bus.S, t, P.whoosh.dur, P.whoosh.gain, 'bandpass', P.whoosh.f0, P.whoosh.f1);
+    toneAt(bus.S, t, P.doppler.dur, P.doppler.gain, 'sine', P.doppler.f0, P.doppler.f1);
+    toneAt(bus.S, t + 0.05, 0.42, 0.12, 'triangle', 250, 1020);
+    toneAt(bus.S, t + 0.1, 0.4, 0.06, 'sine', 2600, 5200); // shimmer
+  },
+};
+
+/* ---- 引擎總表 ---- */
+const engines = { A: engineA, B: engineB, C: engineC, D: engineD, E: engineE };
+
+/* ================================================================
+   連續亂打：3 秒、隨機力道、隨機間隔 60~200ms；再按一次停止
+   ================================================================ */
+const rapidTimers = {};
+function finishRapid(eng) {
+  const st = rapidTimers[eng];
+  if (!st) return;
+  clearTimeout(st.id);
+  delete rapidTimers[eng];
+  st.btn.classList.remove('on');
+  st.btn.textContent = '連續亂打';
+}
+function toggleRapid(eng, btn) {
+  if (rapidTimers[eng]) { finishRapid(eng); return; }
+  const st = { btn, until: performance.now() + 3000, id: 0 };
+  rapidTimers[eng] = st;
+  btn.classList.add('on');
+  btn.textContent = '亂打中…';
+  (function step() {
+    if (!rapidTimers[eng]) return;
+    if (performance.now() >= st.until) { finishRapid(eng); return; }
+    engines[eng].hit(0.12 + Math.random() * 0.88);
+    st.id = setTimeout(step, 60 + Math.random() * 140);
+  })();
+}
+
+/* ================================================================
+   峰值表（analyser → rAF）：>0.95 變紅；峰值保持可歸零
+   ================================================================ */
+let peakHold = 0, meterStarted = false;
+function startMeter() {
+  if (meterStarted) return;
+  meterStarted = true;
+  const bar = qs('#meterBar'), val = qs('#peakVal');
+  const fBuf = new Float32Array(M.analyser.fftSize);
+  const bBuf = new Uint8Array(M.analyser.fftSize);
+  const useFloat = typeof M.analyser.getFloatTimeDomainData === 'function';
+  (function loop() {
+    let p = 0;
+    if (useFloat) {
+      M.analyser.getFloatTimeDomainData(fBuf);
+      for (let i = 0; i < fBuf.length; i++) { const a = Math.abs(fBuf[i]); if (a > p) p = a; }
+    } else {
+      M.analyser.getByteTimeDomainData(bBuf);
+      for (let i = 0; i < bBuf.length; i++) { const a = Math.abs(bBuf[i] - 128) / 128; if (a > p) p = a; }
+    }
+    if (p > peakHold) peakHold = p;
+    bar.style.width = Math.min(100, p * 100) + '%';
+    bar.classList.toggle('hot', p > 0.95);
+    val.textContent = '峰值保持 ' + peakHold.toFixed(3);
+    requestAnimationFrame(loop);
+  })();
+}
+qs('#peakReset').addEventListener('click', () => { peakHold = 0; });
+
+/* ================================================================
+   滑桿 → GLOBALS + 持續節點即時更新；ring 變動 debounce 重建 IR
+   ================================================================ */
+function applyGlobalsToNodes() {
+  if (!ctx) return;
+  M.input.gain.setTargetAtTime(GLOBALS.volume, ctx.currentTime, 0.02);
+  bSoft.curve = tanhCurve(B_PARAMS.softBase + B_PARAMS.softSpan * GLOBALS.crunch);
+  bWet.gain.setTargetAtTime(B_PARAMS.wetBase + B_PARAMS.wetSpan * GLOBALS.ring, ctx.currentTime, 0.05);
+  cCrush.curve = crushCurve(Math.max(4, Math.round(C_PARAMS.crushBase - C_PARAMS.crushSpan * GLOBALS.crunch)));
+}
+let irTimer = 0;
+function scheduleIR() {
+  clearTimeout(irTimer);
+  irTimer = setTimeout(() => { if (ctx) buildIR(); }, 250);
+}
+function updateSnapshot() {
+  qs('#snapshot').innerHTML =
+    '目前設定：<b>vol ' + GLOBALS.volume.toFixed(2) + '</b> / <b>crunch ' + GLOBALS.crunch.toFixed(2) +
+    '</b> / <b>ring ' + GLOBALS.ring.toFixed(2) + '</b> / <b>sub ' + GLOBALS.sub.toFixed(2) + '</b>（回報時照抄這行）';
+}
+for (const [id, key] of [['vol', 'volume'], ['crunch', 'crunch'], ['ring', 'ring'], ['sub', 'sub']]) {
+  const el = qs('#sl-' + id), out = qs('#val-' + id);
+  el.value = String(GLOBALS[key]);
+  const upd = () => {
+    GLOBALS[key] = parseFloat(el.value);
+    out.textContent = GLOBALS[key].toFixed(2);
+    applyGlobalsToNodes();
+    if (key === 'ring') scheduleIR();
+    updateSnapshot();
+  };
+  el.addEventListener('input', upd);
+  upd();
+}
+
+/* ================================================================
+   按鈕事件（委派）＋ 首次手勢解鎖（iOS）
+   ================================================================ */
+document.addEventListener('pointerdown', unlock);
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (!b || b.disabled) return;
+  unlock();
+  if (!ctx) return;
+  const eng = b.closest('[data-engine]').dataset.engine;
+  const act = b.dataset.act;
+  if (act === 'rapid') { toggleRapid(eng, b); return; }
+  if (act === 'l') engines[eng].hit(0.25);
+  else if (act === 'm') engines[eng].hit(0.55);
+  else if (act === 'h') engines[eng].hit(0.95);
+  else if (act === 'ko') engines[eng].ko();
+  else if (act === 'out') shared.ringOut();
+  else if (act === 'launch') shared.launch();
+});
+</script>
+</body>
+</html>

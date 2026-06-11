@@ -24,6 +24,14 @@
   "vars": {
     "ADMIN_EMAILS": "agito723@gmail.com"
   },
+  // 打擊音效取樣（CC0，Kenney impact pack 轉檔）：音檔直傳 R2 不進 repo，
+  // 上傳指令見 scripts/upload-sfx.sh；前端載入失敗會自動回退合成音效。
+  "r2_buckets": [
+    {
+      "binding": "SFX",
+      "bucket_name": "beyblade-sfx"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

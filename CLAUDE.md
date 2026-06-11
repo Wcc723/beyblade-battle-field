@@ -44,7 +44,7 @@ npm run cf-typegen # wrangler types → 重新產生 worker-configuration.d.ts�
 
 ## 前端對戰流程（`BattleViz.vue`）
 
-狀態機 `aim-A → aim-B → playing`：兩種拖曳發射模式（`flick` 甩動＝放手瞬間游標速度決定動能 / `sling` 拉弓＝拉的距離）→ 紅藍**分開依序發射** → `runServerSimulation()` 統一運算 → 回放。回放用**相鄰幀內插**（`lerpFrame`，慢動作才滑順）+ 終結慢動作（`slowmoCues`）+ 必殺技特效 + 傷害數字/場地震動/火星（吃 `collisionEvents` 的 `dmgA/dmgB`，全由播放時間推導、scrub 倒帶可重現）。多回合**先到 3 分**（`roundPoints` 新制：**擊破/停轉/timeout 有勝者＝1 分、出界一律 2 分、平手 0 分**——`cornerScore`/rim 分區已不參與計分，ArenaSvg 出界標籤固定 2×）。**同步死亡 tie-break**：同一步同類雙亡不再平手，比「超殺深度」（`hpAtDeath/maxHp` 較不負者勝；雙停轉比剩餘血量），±10% 傷害浮動讓平手趨近 0（全局 ~0.1%）；混合同步死亡（一 ko 一出界等）維持平手。
+狀態機 `aim-A → aim-B → playing`：兩種拖曳發射模式（`flick` 甩動＝放手瞬間游標速度決定動能 / `sling` 拉弓＝拉的距離）→ 紅藍**分開依序發射** → `runServerSimulation()` 統一運算 → 回放。回放用**相鄰幀內插**（`lerpFrame`，慢動作才滑順）+ 終結慢動作（`slowmoCues`）+ 必殺技特效 + 傷害數字/場地震動/火星（吃 `collisionEvents` 的 `dmgA/dmgB`，全由播放時間推導、scrub 倒帶可重現）。多回合**先到 3 分**（`roundPoints` 新制：**擊破/停轉/timeout 有勝者＝1 分、出界一律 2 分、平手 0 分**——`cornerScore`/rim 分區已不參與計分，ArenaSvg 出界標籤固定 2×）。**同步死亡規則（使用者裁定）**：同一步**雙 ko＝平手**（「雙方血量都歸零就是平手」，靠傷害結構讓它罕見、不靠硬判）；**雙停轉/雙出界才 tie-break**（比剩餘血量 hp/maxHp＝誰較健康）；混合同步死亡維持平手。
 
 ## 設定與後台（localStorage）
 
@@ -98,12 +98,14 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 
 **平衡是「場地 × 屬性」共同決定的**——同一組陀螺換個場地勝率天差地遠。靠時間/停轉決勝 → 續航為王；靠碰撞/出界決勝 → 攻防/重量才有用。**動到 `STAT_PRESETS`、`DEFAULT_ARENA`、`HP_BASE`、`DEFAULT_SPECIAL` 後一定要 `npm run balance` 驗證。** 工具在 `test/balance.bench.ts`（用 `vitest.balance.config.ts`，不混進一般 `npm test`）。
 
-現行校準（2026-06 第二輪定案）：勝負原因 **ko ~61% / spin-out ~27% / ring-out ~12% / draw ~0.1%**；四類型勝率 45~55（attack 48.8 / defense 53.1 / stamina 48.1 / balance 50.0）；猜拳三角 def>atk 67、sta>def 68、atk>sta 62。注意事項：
+現行校準（2026-06 第三輪定案，雙 ko=平手規則下）：勝負原因 **ko ~54% / spin-out ~29% / ring-out ~12% / draw ~4.5%**（draw 幾乎全是雙 KO、集中在 attack 鏡像對局 ~20%——單發傷害佔血池 ~84% 是結構底線）；四類型勝率 48.8 / 49.3 / 50.8 / 51.1；猜拳三角方向保留但刻意收淺（54~56）——**三角越陡＝擊殺時間越收斂＝同步雙 KO 越多**，是結構性權衡。注意事項：
 
-- 碰撞傷害有 **±10% seeded 浮動**（dmgA/dmgB 獨立擲骰）——這是「平手趨近零」的另一半（tie-break 是前一半）。
-- **`defense.attack` 是刀口參數**：atk-def 對局對它極度敏感（0.50~0.58 之間勝率可從 13% 擺到 89%），動它必重跑 balance。
+- 碰撞傷害 **±10% seeded 浮動**（dmgA/dmgB 獨立擲骰）+ **速度主導傷害分配**（`AGGRESSOR_DMG_SPLIT`：衝得快的進攻方少吃、被撞方多吃，impact 90~220 線性淡入）——兩者合力把雙 KO 從 25.9% 壓到 4.5%。
+- **`defense.attack` 是刀口參數**：atk-def 對局對它極度敏感（±0.03 可大幅擺動勝率），動它必重跑 balance。
 - 各勝負原因比例在不同 seed 有 ±1.5pp 取樣噪音，勿對單一 seed 過度擬合。
 - **D1 `global_config` 會蓋過程式碼預設**：重校後要同步線上值（migration 0004 清除舊 blob 回落新預設；之後再重校記得比照處理）。`defaultConfigValue` 的 arena `activeId` 預設必須是 `builtin-xtreme`（清 blob 後若回落圓形場＝正式站默默換場）。
+
+場地（去 IP）：顯示名「熔核競技場 FORGE CORE STADIUM」（程式識別子 `XTREME_STADIUM`/`builtin-xtreme` 為相容性保留）；**「Beyblade」「Xtreme」不得出現在任何使用者可見字串**。第三場地「弧壁競技場 ARC WALL STADIUM」（`builtin-arcwall`）＝超橢圓 r(θ)（`ArenaConfig.superellipse.power`，`arena.ts` 的 `boundaryRadiusAt`/`sampleBoundary` 引擎與 ArenaSvg 共用 → 畫面物理同源）+ 四對角 rim pocket 出界。
 
 ## UI 風格（BURST FORGE 金屬鍛造）
 
@@ -111,7 +113,9 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 - **全站渲染字串零 emoji**；圖示一律 `src/components/ui/BbIcon.vue`（30 個 inline SVG，name+size props）——新增 UI 請沿用，缺圖示就加進 BbIcon 的 ICONS map，不要回頭用 emoji。
 - **`.plate`/`.f-btn` 雷**：clip-path 會吃掉 box-shadow → 外陰影/鍵帽厚度一律走 `filter: drop-shadow()`。
 - 行動版：底部 Tab Bar 只有大廳/個人設定（room/test 路由隱藏）；測試頁與後台入口**僅 admin 渲染**。
-- 中二名稱系統 `src/game/names.ts`（零 Env，worker 與前端共用）：`autoNickname(uid)` 自動暱稱（API 讀設定時補上並持久化）、`beybladeName(uid, type)` 陀螺名（穩定 hash、不存 DB、兩端一致）。
+- 中二名稱系統 `src/game/names.ts`（零 Env，worker 與前端共用）：`autoNickname(uid)` 自動暱稱（API 讀設定時補上並持久化）、`beybladeName(uid, type)` 陀螺名（穩定 hash、不存 DB、兩端一致）。**名池已凍結**（test/names.test.ts 的 checksum 鎖）：hash 取模選名 → 插入/刪除/重排都會讓全服名字洗牌，只准原位替換並更新 checksum。
+- 音效 `src/audio/sfx.ts`＝「街機誇張」純合成引擎（sfx-lab 試聽室 C 案）：bitcrush + pump 壓縮 + 完整響度鏈；**試聽室 `public/sfx-lab.html` 保留**——調音色先去那邊 A/B 定案再搬參數回 sfx.ts。R2 取樣管線（`/api/sfx/:key`、bucket `beyblade-sfx`、`scripts/upload-sfx.sh`）保留但目前未使用（取樣路線被使用者否決，留作未來混血選項）。
+- 場地震動是**容器級**（useBattle 的 `shakeEl` ref 綁場地容器 div，直接 DOM transform、振幅以顯示像素標定）——別再用 ctx.translate 只震 canvas 層（SVG 底圖不會跟著動）。
 
 ## 容易踩的雷
 

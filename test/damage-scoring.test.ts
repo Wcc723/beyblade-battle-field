@@ -186,7 +186,7 @@ describe("dash 回血 (heal)", () => {
   });
 });
 
-describe("同步雙亡 tie-break（超殺深度）", () => {
+describe("同步雙亡 tie-break（雙停轉/雙出界比剩餘血量；雙擊破＝平手）", () => {
   /** 兩顆等屬性對撞的共用組裝：對稱輸入，差異只來自傷害 ±10% 獨立浮動 */
   const pair = (spin: number) => [
     body({ id: "A", position: { x: -30, y: 0 }, velocity: { x: 200, y: 0 }, spin }),
@@ -203,9 +203,8 @@ describe("同步雙亡 tie-break（超殺深度）", () => {
     return { a, b };
   };
 
-  it("同步雙擊破：不再平手，hp/maxHp 較高（較不負＝承傷較少）者勝、reason 維持 ko", () => {
+  it("同步雙擊破：雙方血量同步歸零＝平手（不比超殺深度），無勝者", () => {
     // collisionSpinLoss=4 → 單次對撞 dmg ≈ 400×4×(0.9~1.1) = 1440~1760 > maxHp 1100 → 同一步雙雙歸零
-    let draws = 0;
     for (let seed = 1; seed <= 50; seed++) {
       const r = simulate(pair(1e6), {
         dt: 1 / 60,
@@ -216,18 +215,14 @@ describe("同步雙亡 tie-break（超殺深度）", () => {
       // 確實是同一步雙亡（兩筆死亡事件、同時刻、皆 ko）
       expect(r.deathEvents.length).toBe(2);
       expect(r.deathEvents[0].t).toBe(r.deathEvents[1].t);
-      expect(r.reason).toBe("ko");
-      if (!r.winnerId) {
-        draws++;
-        continue;
-      }
-      // 勝者與超殺深度一致：等 maxHp 滿血開局 → 承傷較少者 hp 較高（較不負）→ 獲勝
-      const d = dmgTaken(r);
-      expect(d.a).not.toBe(d.b); // ±10% 獨立浮動 → 兩側承傷必然不同
-      expect(r.winnerId).toBe(d.a < d.b ? "A" : "B");
-      expect(r.loserId).toBe(d.a < d.b ? "B" : "A");
+      expect(r.deathEvents[0].reason).toBe("ko");
+      expect(r.deathEvents[1].reason).toBe("ko");
+      // 使用者裁定：同步雙 ko 一律平手（即使 ±10% 浮動讓兩側超殺深度不同）
+      expect(r.winnerId).toBeNull();
+      expect(r.loserId).toBeNull();
+      expect(r.reason).toBe("draw");
+      expect(roundPoints(DEFAULT_ARENA, r)).toBe(0); // 平手 0 分
     }
-    expect(draws).toBe(0); // 平手率趨近 0（浮動下兩側 hp 完全相等是理論事件）
   });
 
   it("同步雙停轉：比剩餘血量比例（承傷較少者勝）、reason 維持 spin-out", () => {
