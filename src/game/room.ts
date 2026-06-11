@@ -34,6 +34,13 @@ export interface PublicPlayer {
 export const BOT_UID = -1;
 export const BOT_NICKNAME = "🤖 陪練 BOT";
 
+/** 房號：6 位、去掉易混淆字元（0/O/1/I/L）。worker 路由與 Lobby DO 共用。 */
+export const ROOM_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export function genRoomCode(): string {
+  const buf = crypto.getRandomValues(new Uint8Array(6));
+  return [...buf].map((b) => ROOM_ALPHABET[b % ROOM_ALPHABET.length]).join("");
+}
+
 /** client → server 的瞄準輸入 */
 export interface AimInput {
   x: number; // 落點（世界座標）
@@ -90,6 +97,20 @@ export type ServerMsg =
   | { type: "round"; payload: RoundPayload }
   | { type: "opponent-launched" }
   | { type: "error"; code: string };
+
+/* ---------- 大廳協定（Lobby DO ↔ 前端共用；放這裡＝零 Env 相依，前端 import 不會炸） ---------- */
+
+export interface PublicRoom {
+  code: string;
+  host: string;
+  createdAt: number;
+}
+
+export type LobbyClientMsg = { type: "queue" } | { type: "unqueue" };
+
+export type LobbyServerMsg =
+  | { type: "lobby"; online: number; queueSize: number; queued: boolean; rooms: PublicRoom[] }
+  | { type: "matched"; code: string };
 
 /* ---------- 純函式 ---------- */
 

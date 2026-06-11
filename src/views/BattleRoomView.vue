@@ -183,6 +183,11 @@ function onSpecialChange() {
         <p class="cover-sub">這個分頁的連線已被取代</p>
         <RouterLink class="copy" to="/">← 回大廳</RouterLink>
       </div>
+      <div v-else-if="online.authLost.value" class="m-cover">
+        <p>⚠️ 登入已過期</p>
+        <p class="cover-sub">請重新登入後再回到房間</p>
+        <RouterLink class="copy" to="/login">→ 重新登入</RouterLink>
+      </div>
       <div v-else-if="!online.connected.value" class="m-cover thin">
         <p>🔌 連線中…</p>
         <p class="cover-sub">正在重新連上對戰房</p>

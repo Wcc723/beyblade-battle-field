@@ -36,6 +36,10 @@
       {
         "name": "BATTLE_ROOM",
         "class_name": "BattleRoomDO"
+      },
+      {
+        "name": "LOBBY",
+        "class_name": "LobbyDO"
       }
     ]
   },
@@ -43,7 +47,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["BattleRoomDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["LobbyDO"]
     }
   ]
-  // 之後階段：Phase 5 Lobby Durable Object
 }

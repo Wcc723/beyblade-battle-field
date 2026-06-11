@@ -184,6 +184,50 @@ export async function handleGetSettings(env: Env, session: SessionData): Promise
   return Response.json({ settings, user: { email: session.email, name: session.name, picture: session.picture } });
 }
 
+/** 個人戰績：勝敗統計 + 近期對戰（finished 場次才入庫，必有勝者） */
+export async function handleGetMatches(env: Env, session: SessionData): Promise<Response> {
+  const uid = session.uid;
+  const [agg, rows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN (winner_side = 'A' AND a_uid = ?1) OR (winner_side = 'B' AND b_uid = ?1) THEN 1 ELSE 0 END) AS wins
+       FROM matches WHERE a_uid = ?1 OR b_uid = ?1`,
+    )
+      .bind(uid)
+      .first<{ total: number; wins: number | null }>(),
+    env.DB.prepare(
+      `SELECT a_uid, b_uid, a_nickname, b_nickname, score_a, score_b, winner_side, vs_bot, finished_at
+       FROM matches WHERE a_uid = ?1 OR b_uid = ?1 ORDER BY id DESC LIMIT 20`,
+    )
+      .bind(uid)
+      .all<{
+        a_uid: number | null;
+        b_uid: number | null;
+        a_nickname: string;
+        b_nickname: string;
+        score_a: number;
+        score_b: number;
+        winner_side: string;
+        vs_bot: number;
+        finished_at: string;
+      }>(),
+  ]);
+  const total = agg?.total ?? 0;
+  const wins = agg?.wins ?? 0;
+  const matches = (rows.results ?? []).map((m) => {
+    const mySide = m.a_uid === uid ? "A" : "B";
+    return {
+      opponent: mySide === "A" ? m.b_nickname : m.a_nickname,
+      myScore: mySide === "A" ? m.score_a : m.score_b,
+      oppScore: mySide === "A" ? m.score_b : m.score_a,
+      won: m.winner_side === mySide,
+      vsBot: !!m.vs_bot,
+      finishedAt: m.finished_at,
+    };
+  });
+  return Response.json({ total, wins, losses: total - wins, matches });
+}
+
 export async function handlePutSettings(request: Request, env: Env, session: SessionData): Promise<Response> {
   let body: Partial<UserSettings>;
   try {

@@ -38,6 +38,17 @@ const saving = ref(false);
 const savedAt = ref(0);
 const error = ref("");
 
+/* 戰績 */
+interface MatchRow {
+  opponent: string;
+  myScore: number;
+  oppScore: number;
+  won: boolean;
+  vsBot: boolean;
+  finishedAt: string;
+}
+const record = ref<{ total: number; wins: number; losses: number; matches: MatchRow[] } | null>(null);
+
 // 再編輯任何欄位就收掉「✓ 已儲存」，避免看起來像新改動也存了
 watch(form, () => {
   savedAt.value = 0;
@@ -54,7 +65,20 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+  // 戰績（失敗不擋設定頁）
+  try {
+    const res = await fetch("/api/me/matches");
+    if (res.ok) record.value = (await res.json()) as typeof record.value;
+  } catch {
+    /* ignore */
+  }
 });
+
+function matchTime(iso: string): string {
+  // D1 datetime('now') 是 UTC、無時區標記 → 補 Z 再轉本地
+  const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
 
 async function save() {
   saving.value = true;
@@ -144,7 +168,23 @@ async function save() {
         </div>
 
         <div class="group-title">🏆 戰績</div>
-        <p class="hint">勝敗紀錄與對戰歷史將在大廳上線（Phase 5）後開始累積。</p>
+        <template v-if="record && record.total > 0">
+          <div class="rec-summary">
+            <span class="rec-num win">{{ record.wins }} 勝</span>
+            <span class="rec-num lose">{{ record.losses }} 敗</span>
+            <span class="rec-num">共 {{ record.total }} 場</span>
+            <span class="rec-num rate">勝率 {{ Math.round((record.wins / record.total) * 100) }}%</span>
+          </div>
+          <ul class="rec-list">
+            <li v-for="(m, i) in record.matches" :key="i">
+              <span class="rec-result" :class="m.won ? 'win' : 'lose'">{{ m.won ? "勝" : "敗" }}</span>
+              <span class="rec-opp">vs {{ m.opponent }}<i v-if="m.vsBot" class="rec-bot">BOT</i></span>
+              <span class="rec-score">{{ m.myScore }} : {{ m.oppScore }}</span>
+              <span class="rec-time">{{ matchTime(m.finishedAt) }}</span>
+            </li>
+          </ul>
+        </template>
+        <p v-else class="hint">還沒有對戰紀錄——去大廳打一場吧！</p>
 
         <p v-if="error" class="error">{{ error }}</p>
         <div class="actions">
@@ -240,6 +280,82 @@ async function save() {
   color: var(--muted);
   font-size: 13px;
   margin: 0;
+}
+.rec-summary {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.rec-num {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.rec-num.win {
+  color: #6ad08a;
+}
+.rec-num.lose {
+  color: var(--red);
+}
+.rec-num.rate {
+  color: var(--accent);
+}
+.rec-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.rec-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font-size: 13px;
+}
+.rec-result {
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.rec-result.win {
+  color: #6ad08a;
+}
+.rec-result.lose {
+  color: var(--red);
+}
+.rec-opp {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-bot {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  border-radius: 5px;
+  padding: 0 4px;
+  margin-left: 6px;
+}
+.rec-score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.rec-time {
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
 }
 .error {
   color: var(--red);

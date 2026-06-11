@@ -11,19 +11,22 @@
  * - Phase 5: /api/lobby（轉發 Lobby Durable Object）
  */
 import { handleLogin, handleCallback, handleLogout, isAdminEmail } from "./auth";
-import { getSession } from "./session";
-import { handleGetConfig, handlePutAdminConfig, handleGetSettings, handlePutSettings } from "./api";
+import { getSession, type SessionData } from "./session";
+import { handleGetConfig, handlePutAdminConfig, handleGetSettings, handlePutSettings, handleGetMatches } from "./api";
+import { genRoomCode } from "../src/game/room";
 import type { JoinUser } from "./battleRoomDO";
 
 export { BattleRoomDO } from "./battleRoomDO";
+export { LobbyDO } from "./lobbyDO";
 
-// 房號字母表：去掉易混淆的 0/O/1/I/L
-const ROOM_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_RE = /^\/api\/room\/([A-Z0-9]{6})\/ws$/;
 
-function genRoomCode(): string {
-  const buf = crypto.getRandomValues(new Uint8Array(6));
-  return [...buf].map((b) => ROOM_ALPHABET[b % ROOM_ALPHABET.length]).join("");
+/** 對戰顯示用暱稱：user_settings 優先，fallback Google 名/email */
+async function nicknameOf(env: Env, session: SessionData): Promise<string> {
+  const row = await env.DB.prepare("SELECT nickname FROM user_settings WHERE user_id = ?1")
+    .bind(session.uid)
+    .first<{ nickname: string }>();
+  return (row?.nickname || session.name || session.email.split("@")[0]).slice(0, 20);
 }
 
 export default {
@@ -70,11 +73,46 @@ export default {
       return Response.json({ error: "method_not_allowed" }, { status: 405 });
     }
 
+    // --- 大廳（presence / 快速配對 / 公開房列表） ---
+    if (path === "/api/lobby/ws") {
+      const session = await getSession(request, env.SESSION_SECRET);
+      if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return Response.json({ error: "expected_websocket" }, { status: 426 });
+      }
+      const stub = env.LOBBY.get(env.LOBBY.idFromName("global"));
+      const fwd = new Request(new URL("/ws", "https://lobby"), request);
+      fwd.headers.set("X-BB-User", JSON.stringify({ uid: session.uid, nickname: await nicknameOf(env, session) }));
+      return stub.fetch(fwd);
+    }
+
     // --- 對戰房 ---
     if (path === "/api/room/create" && request.method === "POST") {
       const session = await getSession(request, env.SESSION_SECRET);
       if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
-      return Response.json({ code: genRoomCode() });
+      const body = (await request.json().catch(() => ({}))) as { public?: boolean };
+      const code = genRoomCode();
+      // 公開房：掛上大廳列表（房間開打/棄置時 Battle Room DO 會通知下架）
+      if (body.public === true) {
+        try {
+          const stub = env.LOBBY.get(env.LOBBY.idFromName("global"));
+          await stub.fetch("https://lobby/register-room", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code, host: await nicknameOf(env, session) }),
+          });
+        } catch (err) {
+          console.error("lobby register failed", err); // 大廳掛了不擋開房
+        }
+      }
+      return Response.json({ code });
+    }
+
+    // --- 戰績 ---
+    if (path === "/api/me/matches" && request.method === "GET") {
+      const session = await getSession(request, env.SESSION_SECRET);
+      if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
+      return handleGetMatches(env, session);
     }
     const roomMatch = path.match(ROOM_CODE_RE);
     if (roomMatch) {
@@ -104,6 +142,7 @@ export default {
       fwd.headers.set("X-BB-User", JSON.stringify(user));
       // ?bot=1：BOT 房（內建 AI 對手自動入座另一側）
       fwd.headers.set("X-BB-Bot", url.searchParams.get("bot") === "1" ? "1" : "0");
+      fwd.headers.set("X-BB-Room", roomMatch[1]); // DO 不知道自己的名字：戰績/大廳通知用
       return stub.fetch(fwd);
     }
 

@@ -72,6 +72,13 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 - **DO 雷區（都踩過）**：① input gate 只擋 storage、不擋 D1 查詢——handler 中 `await` D1 時另一事件會交錯執行 read-modify-write → **所有改房間狀態的事件必須走 `run()` promise 串列化**；② alarm 只有一個 slot——瞄準鬧鐘在 `runRound` 後必須 `deleteAlarm()`，且清房要驗 `idleSince` 時戳（殘留鬧鐘提早到點不可誤刪）；③ `RoundPayload` 要落地 storage，join 時對 review/finished 補發（錯過廣播的玩家才看得到回放）；④ 每回合 `roundCfg` 凍結全域設定（消毒與模擬同基準）。
 - **前端雷區**：對手先按下一回合時不能硬切回放（pendingAiming 暫存、播完再切）；發射音效在「真正送出」才播。
 
+### P5（大廳 + 戰績，✅ 完成）
+
+- `worker/lobbyDO.ts`：單一全域 Lobby DO（`idFromName("global")`）——presence（去重 uid）、快速配對佇列（湊兩人發 matched 房號）、公開房列表（Battle Room 開打/清房時打內部介面 `/room-closed` 下架、15 分 TTL + alarm 兜底）。`worker/index.ts` 的 `/api/lobby/ws`、`/api/room/create {public}`、`/api/me/matches`。
+- 戰績：`matches` 表（migration 0003），Battle Room `runRound` 在 matchOver 時寫入（BOT 對手 uid=NULL + vs_bot=1）；個人設定頁顯示勝敗/近 20 場。
+- **佇列雷區**：配對前必須剔除「無活連線」的幽靈 entry（dirty disconnect / DO 重啟殘留會讓真人配到幽靈、進房空等）；佇列 entry 要有 TTL（`since` 欄位）；WS 客戶端 ping 要 `readyState === OPEN` 守衛（CONNECTING 時 send 同步 throw）；session 過期時 WS 握手 401 → 客戶端連敗 3 次後查 `/api/me` 停止重試（否則無限打 401、UI 卡「連線中」）。
+- 測試工具：`scripts/lobby-test.mjs`（兩 token 排隊驗證配到同房）、`scripts/bot-player.mjs`。
+
 線上化雷區：worker 端被單元測試 import 的模組（`session.ts`/`jwt.ts`）必須**零 `Env` 全域型別相依**（root tsconfig 沒有 workers runtime 型別）；OAuth callback 是整頁導航，**失敗一律 302 回 `/login?error=<code>`** 不可回裸 JSON；JWT/任何 base64 的 UTF-8 內容不能 `JSON.parse(atob(...))`（中文會亂碼）。
 
 ## 必殺技

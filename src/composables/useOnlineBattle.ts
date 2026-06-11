@@ -28,6 +28,7 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
   const connected = ref(false);
   const roomFull = ref(false);
   const superseded = ref(false); // 同帳號開了新分頁，本連線被取代
+  const authLost = ref(false); // session 失效：停止重連
   const errorMsg = ref("");
   const opponentJustLaunched = ref(false);
   const sentLaunch = ref(false); // 本地已送出發射（伺服器 echo 前先擋重複瞄準）
@@ -39,6 +40,7 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
   let ws: WebSocket | null = null;
   let closedByUs = false;
   let retryMs = 1000;
+  let consecutiveFails = 0; // 連續「沒 open 過就 close」（session 失效偵測）
   let pingTimer: ReturnType<typeof setInterval> | undefined;
   let nowTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -149,13 +151,16 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
     closedByUs = false;
     const proto = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${proto}://${location.host}/api/room/${code}/ws${options.bot ? "?bot=1" : ""}`);
+    let opened = false;
     ws.onopen = () => {
+      opened = true;
+      consecutiveFails = 0;
       connected.value = true;
       retryMs = 1000;
       errorMsg.value = "";
     };
     ws.onmessage = onMessage;
-    ws.onclose = (e) => {
+    ws.onclose = async (e) => {
       connected.value = false;
       ws = null;
       if (e.code === 4001) {
@@ -166,14 +171,30 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
         superseded.value = true; // 被新分頁取代：不重連
         return;
       }
-      if (!closedByUs) {
-        setTimeout(() => {
-          if (!closedByUs) connect();
-        }, retryMs);
-        retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
+      if (closedByUs) return;
+      // 連續握手失敗 → 可能 session 過期（401 不升級）：確認後停止重試
+      if (!opened && ++consecutiveFails >= 3) {
+        try {
+          const me = (await (await fetch("/api/me")).json()) as { user: unknown };
+          if (!me.user) {
+            authLost.value = true;
+            return;
+          }
+        } catch {
+          /* 網路問題 → 繼續重試 */
+        }
       }
+      setTimeout(() => {
+        if (!closedByUs) connect();
+      }, retryMs);
+      retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
     };
-    if (!pingTimer) pingTimer = setInterval(() => ws?.send("ping"), PING_INTERVAL_MS);
+    if (!pingTimer) {
+      // readyState 守衛：CONNECTING 時 send 會同步丟 InvalidStateError
+      pingTimer = setInterval(() => {
+        if (ws?.readyState === WebSocket.OPEN) ws.send("ping");
+      }, PING_INTERVAL_MS);
+    }
     if (!nowTimer) nowTimer = setInterval(() => (now.value = Date.now()), 500);
   }
 
@@ -226,6 +247,7 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
     connected,
     roomFull,
     superseded,
+    authLost,
     errorMsg,
     opponentJustLaunched,
     opponentAdvanced,

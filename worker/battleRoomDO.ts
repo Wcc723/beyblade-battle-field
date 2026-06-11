@@ -61,6 +61,8 @@ interface StoredRoom {
   winnerSide?: Side;
   /** BOT 房：哪一側是內建 AI（開房帶 ?bot=1 時自動入座） */
   botSide?: Side;
+  /** 房號（DO 不知道自己的 idFromName 名字，join 時由 worker 帶進來）：戰績與大廳通知用 */
+  code?: string;
   /** 全員離線起算時戳（清房要確認真的閒置滿 IDLE_CLEANUP_MS，殘留鬧鐘提早到點不可誤刪） */
   idleSince?: number;
   /** 最後一回合的重跑包：重連/錯過廣播的玩家補發（review/finished 時 join 重送） */
@@ -137,10 +139,11 @@ export class BattleRoomDO extends DurableObject<Env> {
       return Response.json({ error: "bad_user" }, { status: 400 });
     }
     const wantBot = request.headers.get("X-BB-Bot") === "1";
-    return this.run(() => this.handleJoin(user, wantBot));
+    const roomCode = request.headers.get("X-BB-Room") ?? "";
+    return this.run(() => this.handleJoin(user, wantBot, roomCode));
   }
 
-  private async handleJoin(user: JoinUser, wantBot: boolean): Promise<Response> {
+  private async handleJoin(user: JoinUser, wantBot: boolean, roomCode: string): Promise<Response> {
 
     const room = await this.loadRoom();
 
@@ -187,9 +190,11 @@ export class BattleRoomDO extends DurableObject<Env> {
       }
     }
 
-    // 兩人到齊且還在等人 → 開始瞄準
+    room.code ||= roomCode;
+    // 兩人到齊且還在等人 → 開始瞄準（房間開打 → 通知大廳下架公開列表）
     if (room.phase === "waiting" && room.players.A && room.players.B) {
       await this.startAiming(room);
+      await this.notifyLobbyClosed(room.code);
     }
     room.idleSince = undefined; // 有人在房裡
     await this.saveRoom(room);
@@ -312,6 +317,7 @@ export class BattleRoomDO extends DurableObject<Env> {
       const since = room.idleSince ?? Date.now();
       if (Date.now() - since >= IDLE_CLEANUP_MS) {
         await this.ctx.storage.deleteAll(); // 連 alarm 一起清
+        await this.notifyLobbyClosed(room.code); // 公開房開了沒人來就棄置 → 下架
       } else {
         if (room.idleSince === undefined) {
           room.idleSince = since;
@@ -392,6 +398,32 @@ export class BattleRoomDO extends DurableObject<Env> {
     if (this.ctx.getWebSockets().length === 0) room.idleSince ??= Date.now();
     await this.saveRoom(room);
 
+    // 比賽結束 → 寫一筆戰績到 D1（失敗不擋遊戲流程）
+    if (matchOver && room.players.A && room.players.B && room.winnerSide) {
+      const a = room.players.A;
+      const b = room.players.B;
+      try {
+        await this.env.DB.prepare(
+          `INSERT INTO matches (room_code, a_uid, b_uid, a_nickname, b_nickname, score_a, score_b, winner_side, vs_bot)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+        )
+          .bind(
+            room.code ?? "",
+            a.isBot ? null : a.uid,
+            b.isBot ? null : b.uid,
+            a.nickname,
+            b.nickname,
+            room.scoreA,
+            room.scoreB,
+            room.winnerSide,
+            a.isBot || b.isBot ? 1 : 0,
+          )
+          .run();
+      } catch (err) {
+        console.error("match insert failed", err);
+      }
+    }
+
     // 瞄準鬧鐘任務已了——清掉殘留鬧鐘（不清的話 review/finished 階段它到點會誤觸清房檢查，
     // 把全員短暫離線的寬限從 10 分鐘縮成幾秒）；房裡沒人才補排清房鬧鐘
     await this.ctx.storage.deleteAlarm();
@@ -401,6 +433,21 @@ export class BattleRoomDO extends DurableObject<Env> {
 
     this.broadcastAll({ type: "round", payload });
     await this.broadcastRoom(room);
+  }
+
+  /** 通知大廳把這個房號從公開列表下架（房間開打 / 被清掉）；大廳掛了不擋遊戲。 */
+  private async notifyLobbyClosed(code: string | undefined): Promise<void> {
+    if (!code) return;
+    try {
+      const stub = this.env.LOBBY.get(this.env.LOBBY.idFromName("global"));
+      await stub.fetch("https://lobby/room-closed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+    } catch (err) {
+      console.error("lobby notify failed", err);
+    }
   }
 
   private snapshotOf(room: StoredRoom, arenaName?: string): RoomSnapshot {
