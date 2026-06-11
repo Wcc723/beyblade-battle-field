@@ -15,6 +15,14 @@ const SIZE = 640;
 const PAD = 28; // 與 BattleViz 的 toCanvas/scaleLen 一致
 const C = SIZE / 2; // 320：場地中心
 
+// 機殼四角鉚釘座標（純裝飾，與物理幾何無關）
+const RIVETS: ReadonlyArray<readonly [number, number]> = [
+  [22, 22],
+  [SIZE - 22, 22],
+  [22, SIZE - 22],
+  [SIZE - 22, SIZE - 22],
+];
+
 // 縮放基準：方形場用半邊長、圓形場用半徑（場地剛好填滿畫布）
 const scaleRef = computed(() => (props.arena.box ? props.arena.box.half : props.arena.radius));
 const scale = computed(() => (SIZE / 2 - PAD) / scaleRef.value);
@@ -30,7 +38,7 @@ function pt(r: number, a: number): [number, number] {
 }
 
 /**
- * 綠色軟牆（M 形 Xtreme Line）描繪：吃「引擎用的同一份」softWall r(θ)（sampleSoftWall），
+ * 熔岩軟牆（M 形 Xtreme Line）描繪：吃「引擎用的同一份」softWall r(θ)（sampleSoftWall），
  * 等角取樣世界座標 → 畫布（含 y 翻轉，與 BattleViz.toCanvas 一致）→ 折線。畫面與物理同源。
  */
 function toSvgWorld(wx: number, wy: number): string {
@@ -61,7 +69,7 @@ const circG = computed(() => {
     const sa = -seg.angle; // 世界角 θ → SVG 角 -θ（y 軸翻轉）
     return { a0: sa - seg.half, a1: sa + seg.half, mid: sa, kind: rp.kind, score: rp.score };
   });
-  // 綠軌：頂端留缺口，呼應實體場 M 形開口
+  // 熔岩軌：頂端留缺口，呼應實體場 M 形開口
   const gap = 0.5;
   const railPath = railG.value ? arcPath(railG.value.r, -Math.PI / 2 + gap, -Math.PI / 2 - gap, 1, 1) : "";
   return { R, exits, railPath };
@@ -102,46 +110,88 @@ const boxG = computed(() => {
 <template>
   <svg class="arena-svg" :viewBox="`0 0 ${SIZE} ${SIZE}`" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
     <defs>
+      <!-- 黑鋼碗面：中心微亮 → 邊緣沉黑的放射漸層 -->
       <radialGradient id="as-bowl" cx="50%" cy="45%" r="62%">
-        <stop offset="0%" stop-color="#fbfdff" />
-        <stop offset="55%" stop-color="#e7edf5" />
-        <stop offset="85%" stop-color="#c3cedd" />
-        <stop offset="100%" stop-color="#98a5ba" />
+        <stop offset="0%" stop-color="#353b46" />
+        <stop offset="55%" stop-color="#272c35" />
+        <stop offset="85%" stop-color="#1f232b" />
+        <stop offset="100%" stop-color="#1a1d24" />
       </radialGradient>
       <radialGradient id="as-shade" cx="50%" cy="50%" r="50%">
         <stop offset="0%" stop-color="rgba(0,0,0,0)" />
         <stop offset="74%" stop-color="rgba(0,0,0,0)" />
-        <stop offset="100%" stop-color="rgba(18,28,44,0.4)" />
+        <stop offset="100%" stop-color="rgba(0,0,0,0.5)" />
       </radialGradient>
+      <!-- 加速軌道：熔岩橘能量（白熱 → 琥珀 → 熔岩） -->
       <linearGradient id="as-rail" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#b6ff7a" />
-        <stop offset="45%" stop-color="#46d65e" />
-        <stop offset="100%" stop-color="#1d9a3a" />
+        <stop offset="0%" stop-color="#fff3d6" />
+        <stop offset="45%" stop-color="#ffb31f" />
+        <stop offset="100%" stop-color="#ff7a18" />
       </linearGradient>
       <filter id="as-railglow" x="-30%" y="-30%" width="160%" height="160%">
-        <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#46d65e" flood-opacity="0.55" />
+        <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ff7a18" flood-opacity="0.6" />
       </filter>
       <filter id="as-bowlshadow" x="-20%" y="-20%" width="140%" height="140%">
         <feDropShadow dx="0" dy="4" stdDeviation="9" flood-color="#000" flood-opacity="0.45" />
       </filter>
+      <!-- 金屬機殼：殼面漸層 + bevel 雙描邊（上亮下暗）+ 鉚釘 -->
+      <linearGradient id="as-shell" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#262b34" />
+        <stop offset="55%" stop-color="#171a20" />
+        <stop offset="100%" stop-color="#0d0f13" />
+      </linearGradient>
+      <linearGradient id="as-bevel-hi" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#4a5260" />
+        <stop offset="100%" stop-color="#14161b" />
+      </linearGradient>
+      <linearGradient id="as-bevel-lo" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0a0c10" />
+        <stop offset="100%" stop-color="#3a414e" />
+      </linearGradient>
+      <radialGradient id="as-rivet" cx="35%" cy="30%" r="80%">
+        <stop offset="0%" stop-color="#cfd6e2" />
+        <stop offset="45%" stop-color="#8f99a8" />
+        <stop offset="100%" stop-color="#3a414e" />
+      </radialGradient>
+      <!-- 出界口：黃黑警示斜紋 -->
+      <pattern id="as-hazard" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width="18" height="18" fill="#15171c" />
+        <rect width="9" height="18" fill="#ffb31f" />
+      </pattern>
     </defs>
 
-    <!-- 外框：透明塑膠機殼 -->
-    <rect x="6" y="6" :width="SIZE - 12" :height="SIZE - 12" rx="26" fill="#11151c" stroke="#2a3340" stroke-width="2" />
-    <rect x="16" y="16" :width="SIZE - 32" :height="SIZE - 32" rx="20" fill="none" stroke="rgba(173,190,214,0.12)" stroke-width="10" />
+    <!-- 外框：金屬機殼（bevel 上亮下暗 + 內框厚邊 + 四角鉚釘） -->
+    <rect x="6" y="6" :width="SIZE - 12" :height="SIZE - 12" rx="26" fill="url(#as-shell)" stroke="url(#as-bevel-hi)" stroke-width="2.5" />
+    <rect x="11" y="11" :width="SIZE - 22" :height="SIZE - 22" rx="22" fill="none" stroke="url(#as-bevel-lo)" stroke-width="1.5" />
+    <rect x="16" y="16" :width="SIZE - 32" :height="SIZE - 32" rx="20" fill="none" stroke="rgba(170,180,196,0.1)" stroke-width="10" />
+    <g v-for="(rv, i) in RIVETS" :key="'rv' + i">
+      <circle :cx="rv[0]" :cy="rv[1]" r="5" fill="url(#as-rivet)" stroke="rgba(0,0,0,0.55)" stroke-width="1" />
+      <circle :cx="rv[0] - 1.6" :cy="rv[1] - 1.6" r="1.4" fill="rgba(255,255,255,0.65)" />
+    </g>
 
     <!-- 方形場 -->
     <g v-if="boxG">
+      <clipPath id="as-boxclip">
+        <rect :x="boxG.left" :y="boxG.top" :width="boxG.side" :height="boxG.side" :rx="boxG.rx" />
+      </clipPath>
       <rect :x="boxG.left" :y="boxG.top" :width="boxG.side" :height="boxG.side" :rx="boxG.rx" fill="url(#as-bowl)" filter="url(#as-bowlshadow)" />
       <rect :x="boxG.left" :y="boxG.top" :width="boxG.side" :height="boxG.side" :rx="boxG.rx" fill="url(#as-shade)" />
+      <!-- 拉絲紋：低透明同心細圈（純裝飾） -->
+      <g clip-path="url(#as-boxclip)">
+        <circle :cx="C" :cy="C" :r="boxG.side * 0.46" fill="none" stroke="rgba(170,180,196,0.1)" stroke-width="1.5" />
+        <circle :cx="C" :cy="C" :r="boxG.side * 0.32" fill="none" stroke="rgba(170,180,196,0.08)" stroke-width="1.5" />
+        <circle :cx="C" :cy="C" :r="boxG.side * 0.18" fill="none" stroke="rgba(170,180,196,0.07)" stroke-width="1.5" />
+      </g>
+      <!-- 碗外緣：鋼色描邊 -->
+      <rect :x="boxG.left" :y="boxG.top" :width="boxG.side" :height="boxG.side" :rx="boxG.rx" fill="none" stroke="#7e8a9c" stroke-width="2.5" />
 
-      <!-- 四個角：出界範圍（紅色填滿 + 虛線邊） -->
-      <polygon v-for="(c, i) in boxG.corners" :key="'c' + i" :points="c" fill="rgba(255,107,107,0.18)" stroke="#ff6b6b" stroke-width="2.5" stroke-dasharray="7 6" stroke-linejoin="round" />
+      <!-- 四個角：出界範圍（黃黑警示斜紋 + 細紅描邊保留危險語意） -->
+      <polygon v-for="(c, i) in boxG.corners" :key="'c' + i" :points="c" fill="url(#as-hazard)" fill-opacity="0.85" stroke="#e8442e" stroke-width="2" stroke-linejoin="round" />
 
       <!-- 四邊：會反彈的牆 -->
-      <line v-for="(e, i) in boxG.edges" :key="'e' + i" :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" stroke="#9aa8c4" stroke-width="7" stroke-linecap="round" />
+      <line v-for="(e, i) in boxG.edges" :key="'e' + i" :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" stroke="#aab4c4" stroke-width="7" stroke-linecap="round" />
 
-      <!-- 綠色加速軌道（Xtreme Line）：頂端 M 形凹口，把陀螺往中心擠 -->
+      <!-- 熔岩加速軌道（Xtreme Line）：頂端 M 形凹口，把陀螺往中心擠 -->
       <path v-if="railShape" :d="railShape" fill="none" stroke="url(#as-rail)" :stroke-width="swBandPx" stroke-linejoin="round" stroke-linecap="round" filter="url(#as-railglow)" />
 
       <!-- 角落計分 -->
@@ -152,10 +202,10 @@ const boxG = computed(() => {
         :y="l.y"
         text-anchor="middle"
         dominant-baseline="central"
-        fill="#ff9b9b"
-        font-size="17"
+        fill="#ffb31f"
+        font-size="18"
         font-weight="700"
-        font-family="system-ui, sans-serif"
+        font-family="'Big Shoulders Display', 'Noto Sans TC', sans-serif"
       >{{ l.score }}×</text>
     </g>
 
@@ -163,11 +213,14 @@ const boxG = computed(() => {
     <g v-else-if="circG">
       <circle :cx="C" :cy="C" :r="circG.R" fill="url(#as-bowl)" filter="url(#as-bowlshadow)" />
       <circle :cx="C" :cy="C" :r="circG.R" fill="url(#as-shade)" />
-      <circle :cx="C" :cy="C" :r="circG.R * 0.72" fill="none" stroke="rgba(120,140,165,0.18)" stroke-width="1.5" />
-      <circle :cx="C" :cy="C" :r="circG.R * 0.45" fill="none" stroke="rgba(120,140,165,0.14)" stroke-width="1.5" />
-      <circle :cx="C" :cy="C" :r="circG.R" fill="none" stroke="#7d8aa8" stroke-width="3" />
+      <!-- 拉絲紋：steel 低透明同心細圈 -->
+      <circle :cx="C" :cy="C" :r="circG.R * 0.88" fill="none" stroke="rgba(170,180,196,0.1)" stroke-width="1.5" />
+      <circle :cx="C" :cy="C" :r="circG.R * 0.72" fill="none" stroke="rgba(170,180,196,0.09)" stroke-width="1.5" />
+      <circle :cx="C" :cy="C" :r="circG.R * 0.45" fill="none" stroke="rgba(170,180,196,0.07)" stroke-width="1.5" />
+      <!-- 碗外緣：鋼色描邊 -->
+      <circle :cx="C" :cy="C" :r="circG.R" fill="none" stroke="#7e8a9c" stroke-width="3" />
 
-      <!-- 綠色實體內牆（M 形 Xtreme Line）：圓形場也能套用（與 box 解耦），吃同一份 sampleSoftWall -->
+      <!-- 熔岩實體內牆（M 形 Xtreme Line）：圓形場也能套用（與 box 解耦），吃同一份 sampleSoftWall -->
       <path
         v-if="railShape"
         :d="railShape"
@@ -194,7 +247,7 @@ const boxG = computed(() => {
           v-if="e.kind !== 'wall' || e.score > 1"
           :d="arcPath(circG.R, e.a0, e.a1, 0, 1)"
           fill="none"
-          :stroke="e.kind === 'break' ? '#ff6b6b' : '#ffd166'"
+          :stroke="e.kind === 'break' ? '#e8442e' : '#ffb31f'"
           :stroke-width="e.kind === 'break' ? 12 : 9"
           :stroke-dasharray="e.kind === 'break' ? '7 6' : 'none'"
           stroke-linecap="round"
@@ -205,10 +258,10 @@ const boxG = computed(() => {
           :y="pt(circG.R - 24, e.mid)[1]"
           text-anchor="middle"
           dominant-baseline="central"
-          :fill="e.kind === 'break' ? '#ff8b8b' : '#ffd166'"
-          font-size="17"
+          :fill="e.kind === 'break' ? '#ff9d8c' : '#ffb31f'"
+          font-size="18"
           font-weight="700"
-          font-family="system-ui, sans-serif"
+          font-family="'Big Shoulders Display', 'Noto Sans TC', sans-serif"
         >{{ e.score }}×</text>
       </g>
     </g>

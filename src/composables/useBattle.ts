@@ -59,8 +59,8 @@ export function useBattle(opts: UseBattleOptions = {}) {
     spinDir: 1 | -1;
     special: "" | SpecialKind;
   }
-  const setupA = reactive<Setup>({ id: "A", color: "#ff5d5d", preset: "balance", spinDir: 1, special: "rush" });
-  const setupB = reactive<Setup>({ id: "B", color: "#5db4ff", preset: "attack", spinDir: -1, special: "blast" });
+  const setupA = reactive<Setup>({ id: "A", color: "#e8442e", preset: "balance", spinDir: 1, special: "rush" });
+  const setupB = reactive<Setup>({ id: "B", color: "#2e9fe8", preset: "attack", spinDir: -1, special: "blast" });
   const presetKeys = Object.keys(STAT_PRESETS);
 
   /* ---------- 對戰流程狀態機 ---------- */
@@ -70,9 +70,9 @@ export function useBattle(opts: UseBattleOptions = {}) {
   const launchB = ref<BeybladeInit | null>(null);
 
   const phaseText = computed(() => {
-    if (phase.value === "aim-A") return "🔴 紅方 A 發射";
-    if (phase.value === "aim-B") return "🔵 藍方 B 發射";
-    return "⚔️ 對戰回放";
+    if (phase.value === "aim-A") return "紅方 A 發射";
+    if (phase.value === "aim-B") return "藍方 B 發射";
+    return "對戰回放";
   });
 
   /* ---------- 計分賽制（先到 N 分，WIN_SCORE 在 src/game/scoring.ts）---------- */
@@ -146,7 +146,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
 
   const hintText = computed(() =>
     launchMode.value === "flick"
-      ? "點住設定落點 → 朝目標方向「甩」一下放手；甩越快力道越大（整個視窗都能甩）。"
+      ? "點住設定落點，朝目標方向「甩」一下放手；甩越快力道越大（整個視窗都能甩）。"
       : "在場上按住拖曳：往後拉蓄力、決定角度，放開即發射。",
   );
 
@@ -527,10 +527,10 @@ export function useBattle(opts: UseBattleOptions = {}) {
     const lift = scaleLen(z);
     const hScale = 1 + Math.min(0.45, z / 150);
 
-    // 影子
+    // 底部反光：黑鋼碗上改淺色金屬反光（低透明白橢圓），取代原本的黑影
     g.save();
-    g.globalAlpha = Math.max(0.06, 0.3 - z / 280) * alpha;
-    g.fillStyle = "#000";
+    g.globalAlpha = Math.max(0.04, 0.16 - z / 320) * alpha;
+    g.fillStyle = "#fff3d6";
     const sh = 1 - Math.min(0.4, z / 220);
     g.beginPath();
     g.ellipse(gx, gy, rad * sh, rad * 0.5 * sh, 0, 0, Math.PI * 2);
@@ -647,8 +647,8 @@ export function useBattle(opts: UseBattleOptions = {}) {
         const fr = scaleLen(14 + s * 44);
         const grad = g.createRadialGradient(ex, ey, 0, ex, ey, fr);
         grad.addColorStop(0, `rgba(255,255,255,${0.6 * fa * (0.5 + s)})`);
-        grad.addColorStop(0.4, `rgba(255,225,150,${0.32 * fa * (0.5 + s)})`);
-        grad.addColorStop(1, "rgba(255,170,70,0)");
+        grad.addColorStop(0.4, `rgba(255,210,77,${0.32 * fa * (0.5 + s)})`);
+        grad.addColorStop(1, "rgba(255,138,60,0)");
         g.globalAlpha = 1;
         g.fillStyle = grad;
         g.beginPath();
@@ -681,7 +681,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
       g.fill();
       g.shadowBlur = 0;
 
-      // 放射火花（更多 10~34 條、更長、白→橙→紅）
+      // 放射火花（更多 10~34 條、更長、焊接火星色階：白熱→琥珀→熔岩，末段轉暗紅熄滅）
       const n = 10 + Math.floor(s * 24);
       const reach = scaleLen(22 + s * 72);
       for (let i = 0; i < n; i++) {
@@ -693,7 +693,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
         const sn = Math.sin(ang);
         g.globalAlpha = (1 - a) * (0.8 + 0.2 * s);
         const r = hash01(k * 7.3 + i);
-        g.strokeStyle = r < 0.4 ? "#ffffff" : r < 0.75 ? "#ffcf5a" : "#ff8a3c";
+        g.strokeStyle = a > 0.7 ? "#a13218" : r < 0.4 ? "#fff3d6" : r < 0.75 ? "#ffd24d" : "#ff8a3c";
         g.lineWidth = (2 + s * 2.2) * (1 - a * 0.4);
         g.beginPath();
         g.moveTo(ex + c * d0, ey + sn * d0);
@@ -894,11 +894,11 @@ export function useBattle(opts: UseBattleOptions = {}) {
     }
     g.restore();
   }
-  /** 衝擊：黃白雙爆發環。 */
+  /** 衝擊：琥珀白雙爆發環。 */
   function drawBlastFx(g: CanvasRenderingContext2D, ex: number, ey: number, p: number) {
     g.save();
     g.globalAlpha = (1 - p) * 0.85;
-    g.strokeStyle = "#ffce4d";
+    g.strokeStyle = "#ffb31f";
     g.lineWidth = scaleLen(6) * (1 - p);
     g.beginPath();
     g.arc(ex, ey, scaleLen(14) + scaleLen(92) * p, 0, Math.PI * 2);
@@ -1053,20 +1053,25 @@ export function useBattle(opts: UseBattleOptions = {}) {
         const name = SPECIAL_NAMES[ev.kind];
         const ecol = specialColor(ev);
         g.save();
-        g.globalAlpha = 0.16;
+        // 停格底：壓暗整個場景讓大字跳出（黑鋼底上加深透明度才有感）
+        g.globalAlpha = 0.3;
         g.fillStyle = "#05080d";
         g.fillRect(0, 0, SIZE, SIZE);
         g.globalAlpha = 1;
         g.textAlign = "center";
         g.textBaseline = "middle";
-        g.font = "900 56px system-ui, sans-serif";
+        g.font = "900 56px 'Big Shoulders Display', 'Noto Sans TC', sans-serif";
+        // 深色描邊在黑鋼底上沒對比 → 改白熱描邊 + 招式色光暈
         g.lineWidth = 8;
-        g.strokeStyle = "rgba(5,8,13,0.92)";
+        g.strokeStyle = "rgba(255,243,214,0.35)";
         g.strokeText(name, SIZE / 2, SIZE * 0.2);
+        g.shadowColor = ecol;
+        g.shadowBlur = 24;
         g.fillStyle = ecol;
         g.fillText(name, SIZE / 2, SIZE * 0.2);
-        g.font = "bold 16px system-ui";
-        g.fillStyle = "#aebbd4";
+        g.shadowBlur = 0;
+        g.font = "bold 16px 'Noto Sans TC', sans-serif";
+        g.fillStyle = "#dfe5ee";
         g.fillText(colorOf(ev.id) === setupA.color ? "紅方 必殺技!" : "藍方 必殺技!", SIZE / 2, SIZE * 0.2 + 42);
         g.textBaseline = "alphabetic";
         g.restore();
@@ -1092,7 +1097,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
         g.beginPath();
         g.moveTo(sx, sy);
         g.lineTo(px, py);
-        g.strokeStyle = "#ffffff66";
+        g.strokeStyle = "rgba(255,243,214,0.45)";
         g.lineWidth = 2;
         g.stroke();
         g.restore();
@@ -1109,13 +1114,13 @@ export function useBattle(opts: UseBattleOptions = {}) {
         }
       }
 
-      // 發射方向箭頭
+      // 發射方向箭頭（琥珀能量色）
       if (ax !== sx || ay !== sy) {
         g.save();
         g.beginPath();
         g.moveTo(sx, sy);
         g.lineTo(ax, ay);
-        g.strokeStyle = setup.color;
+        g.strokeStyle = "#ffb31f";
         g.lineWidth = 4;
         g.stroke();
         const ang = Math.atan2(ay - sy, ax - sx);
@@ -1126,15 +1131,15 @@ export function useBattle(opts: UseBattleOptions = {}) {
         g.lineTo(-12, -7);
         g.lineTo(-12, 7);
         g.closePath();
-        g.fillStyle = setup.color;
+        g.fillStyle = "#ffb31f";
         g.fill();
         g.restore();
       }
 
-      // 力道
+      // 力道（白熱字色）
       g.save();
-      g.fillStyle = "#fff";
-      g.font = "bold 16px system-ui";
+      g.fillStyle = "#fff3d6";
+      g.font = "bold 16px 'Big Shoulders Display', 'Noto Sans TC', sans-serif";
       g.fillText(`力道 ${powerPct.value}%`, sx + 14, sy - 12);
       g.restore();
     }
@@ -1177,7 +1182,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     return `${name} ${reasonText[r.reason]} ＋${lastRoundPoints.value} 分`;
   }
   function championLabel(): string {
-    return scoreA.value >= WIN_SCORE ? "🏆 紅方 A 奪冠！" : "🏆 藍方 B 奪冠！";
+    return scoreA.value >= WIN_SCORE ? "紅方 A 奪冠！" : "藍方 B 奪冠！";
   }
   function isFinished(): boolean {
     const frames = result.value?.frames;
@@ -1212,11 +1217,11 @@ export function useBattle(opts: UseBattleOptions = {}) {
     vortex: "旋　渦",
     clone: "分　身",
   };
-  /** 必殺技特效色：blast 黃 / dash 青 / vortex 紫 / rush・clone 用玩家色。 */
+  /** 必殺技特效色：blast 琥珀 / dash 青 / vortex 紫 / rush・clone 用玩家色。 */
   function specialColor(ev: SpecialEvent): string {
     switch (ev.kind) {
       case "blast":
-        return "#ffce4d";
+        return "#ffb31f";
       case "dash":
         return "#5fd0ff";
       case "vortex":

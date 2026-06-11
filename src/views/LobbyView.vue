@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLobby } from "../composables/useLobby";
+import BbIcon from "../components/ui/BbIcon.vue";
 
 const router = useRouter();
 const lobby = useLobby();
@@ -73,58 +74,108 @@ function timeAgo(ts: number): string {
 
 <template>
   <div class="lobby">
-    <section class="card">
+    <!-- 主控面板：配對 / 房號加入 / 開房 -->
+    <section class="plate plate--rivets panel">
       <div class="head-row">
-        <h2>🏟️ 對戰大廳</h2>
-        <span class="online" :class="{ off: !lobby.connected.value }">
-          {{ lobby.connected.value ? `🟢 線上 ${lobby.online.value} 人` : lobby.authLost.value ? "" : "🔌 連線中…" }}
-        </span>
+        <h2 class="f-label">對戰大廳</h2>
+        <div class="pills">
+          <!-- 線上人數金屬章 -->
+          <span v-if="lobby.connected.value" class="pill">
+            <BbIcon name="people" :size="14" class="pic pic--ok" />
+            <b>{{ lobby.online.value }}</b>
+            <span class="pill-unit">人在線</span>
+          </span>
+          <!-- 連線狀態金屬章 -->
+          <span
+            class="pill"
+            :class="lobby.connected.value ? 'pill--on' : lobby.authLost.value ? 'pill--lost' : 'pill--off'"
+          >
+            <BbIcon name="wifi" :size="14" class="pic" />
+            {{ lobby.connected.value ? "連線正常" : lobby.authLost.value ? "已斷線" : "連線中…" }}
+          </span>
+        </div>
       </div>
+
       <p v-if="lobby.authLost.value" class="auth-lost">
-        ⚠️ 登入已過期，請<RouterLink to="/login">重新登入</RouterLink>後再回大廳。
+        <span class="f-badge f-badge--red">登入逾期</span>
+        <span>登入已過期，請<RouterLink to="/login">重新登入</RouterLink>後再回大廳。</span>
       </p>
 
-      <!-- 快速配對 -->
-      <button class="quick" :class="{ queueing: lobby.queued.value }" :disabled="!lobby.connected.value" @click="toggleQueue">
-        <template v-if="lobby.queued.value">⏳ 配對中（佇列 {{ lobby.queueSize.value }} 人）— 點擊取消</template>
-        <template v-else>⚡ 快速配對</template>
+      <!-- 快速配對：整頁最大 CTA；排隊中切換成充能斜紋 + 取消排隊 -->
+      <button
+        class="f-btn f-btn--primary quick"
+        :class="{ queueing: lobby.queued.value }"
+        :disabled="!lobby.connected.value"
+        @click="toggleQueue"
+      >
+        <template v-if="lobby.queued.value">
+          <BbIcon name="hourglass" :size="18" />
+          <span>取消排隊</span>
+          <span class="quick-en">佇列 {{ lobby.queueSize.value }} 人</span>
+        </template>
+        <template v-else>
+          <BbIcon name="lightning" :size="20" />
+          <span>快速配對</span>
+          <span class="quick-en">QUICK MATCH</span>
+        </template>
       </button>
 
       <!-- 房號加入 -->
       <div class="join-row">
         <input
           v-model="roomCode"
-          placeholder="輸入房號加入（例：AB12CD）"
+          class="f-input code-input"
+          placeholder="輸入房號"
           maxlength="6"
+          aria-label="輸入房號"
           @keyup.enter="joinByCode"
         />
-        <button :disabled="!roomCode.trim()" @click="joinByCode">加入房間</button>
+        <button class="f-btn join-btn" :disabled="!roomCode.trim()" @click="joinByCode">
+          <BbIcon name="door-open" :size="16" />加入
+        </button>
       </div>
-      <p v-if="codeError" class="error">{{ codeError }}</p>
+      <p v-if="codeError" class="error">
+        <span class="f-badge f-badge--red">錯誤</span>{{ codeError }}
+      </p>
 
       <!-- 開房 -->
       <div class="actions">
-        <button class="primary" :disabled="creating" @click="createRoom(false)">
-          {{ creating ? "開房中…" : "➕ 開新房間" }}
+        <button class="f-btn f-btn--ghost act-btn" :disabled="creating" @click="createRoom(false)">
+          <BbIcon name="plus" :size="16" />{{ creating ? "開房中…" : "建立房間" }}
         </button>
-        <button class="bot" :disabled="creating" @click="createRoom(true)">🤖 跟 BOT 對戰</button>
+        <button class="f-btn f-btn--ghost act-btn bot-btn" :disabled="creating" @click="createRoom(true)">
+          <BbIcon name="controller" :size="16" />跟 BOT 對戰
+        </button>
       </div>
+      <!-- 公開房間勾選：金屬方形勾選鍵 -->
       <label class="pub-toggle">
-        <input type="checkbox" v-model="makePublic" />
-        <span>開新房間時在大廳公開（別人看得到、可直接加入）</span>
+        <input v-model="makePublic" type="checkbox" class="pub-check" />
+        <span class="pub-box" aria-hidden="true"><BbIcon name="check" :size="12" /></span>
+        <span class="pub-txt">開新房間時在大廳公開（別人看得到、可直接加入）</span>
       </label>
     </section>
 
-    <section class="card">
-      <h3>公開房間（{{ lobby.rooms.value.length }}）</h3>
-      <p v-if="lobby.rooms.value.length === 0" class="hint">目前沒有等人中的公開房間——開一間或用快速配對吧。</p>
+    <!-- 公開房間列表 -->
+    <section class="plate plate--rivets panel">
+      <h3 class="f-label">公開房間（{{ lobby.rooms.value.length }}）</h3>
+      <!-- 空狀態：鋼板銘文 -->
+      <div v-if="lobby.rooms.value.length === 0" class="empty">
+        <p class="empty-title">目前沒有公開房間</p>
+        <p class="empty-sub">開一間或用快速配對吧</p>
+      </div>
       <ul v-else class="room-list">
-        <li v-for="r in lobby.rooms.value" :key="r.code">
-          <div class="room-info">
-            <b class="room-host">{{ r.host }}</b>
-            <span class="room-meta">#{{ r.code }} · {{ timeAgo(r.createdAt) }}</span>
-          </div>
-          <button class="join" @click="router.push({ name: 'room', params: { code: r.code } })">⚔️ 加入</button>
+        <li v-for="r in lobby.rooms.value" :key="r.code" class="plate room-card">
+          <span class="room-code">{{ r.code }}</span>
+          <span class="room-meta">
+            <span class="room-host"><span class="host-tag">房主</span>{{ r.host }}</span>
+            <span class="room-sub">
+              <span class="f-badge f-badge--amber wait">等待中</span>
+              <span class="ago">{{ timeAgo(r.createdAt) }}</span>
+            </span>
+          </span>
+          <button class="f-btn room-join" @click="router.push({ name: 'room', params: { code: r.code } })">
+            加入<BbIcon name="arrow-right" :size="14" />
+          </button>
         </li>
       </ul>
     </section>
@@ -135,182 +186,338 @@ function timeAgo(ts: number): string {
 .lobby {
   display: grid;
   gap: 16px;
-  max-width: 560px;
+  max-width: 480px;
   margin: 0 auto;
 }
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 18px 20px;
-}
-.card h2,
-.card h3 {
-  margin: 0 0 8px;
-}
+
+/* ---- 面板頭列：標題 + 狀態章 ---- */
 .head-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
-.head-row h2 {
+.head-row .f-label {
   margin: 0;
 }
-.online {
-  font-size: 13px;
-  color: #6ad08a;
-  white-space: nowrap;
+.pills {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
-.online.off {
+/* 金屬章：切角鐵牌 + 頂部高光 */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px 5px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--steel);
+  white-space: nowrap;
+  background: linear-gradient(180deg, #23272f, #14171d);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+.pill b {
+  font-family: var(--f-d);
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  color: #fff;
+}
+.pill-unit {
+  letter-spacing: 0.1em;
+}
+.pic--ok {
+  color: var(--ok);
+}
+.pill--on .pic {
+  color: var(--accent);
+}
+.pill--off {
   color: var(--muted);
 }
-.auth-lost {
-  background: rgba(255, 93, 93, 0.08);
-  border: 1px solid rgba(255, 93, 93, 0.3);
+.pill--lost {
   color: var(--red);
-  border-radius: 9px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 0 0 1px rgba(232, 68, 46, 0.4);
+}
+
+/* ---- 登入逾期警示列 ---- */
+.auth-lost {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
   padding: 9px 12px;
   font-size: 13px;
-  margin: 0 0 10px;
+  color: var(--text);
+  background: rgba(232, 68, 46, 0.07);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  box-shadow: inset 0 0 0 1px rgba(232, 68, 46, 0.35);
 }
 .auth-lost a {
   color: var(--accent);
 }
+
+/* ---- 快速配對：滿版大機台鍵 ---- */
 .quick {
   width: 100%;
-  background: var(--accent);
-  color: #1a1207;
-  border: 1px solid var(--accent);
-  border-radius: 12px;
-  padding: 13px;
-  font-size: 15px;
-  font-weight: 800;
-  cursor: pointer;
+  min-height: 56px;
+  padding: 15px 18px;
+  font-size: 19px;
+  letter-spacing: 0.24em;
+  text-indent: 0.1em;
   margin-bottom: 12px;
 }
-.quick.queueing {
-  background: rgba(255, 209, 102, 0.14);
+.quick-en {
+  font-family: var(--f-d);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  opacity: 0.78;
+  text-indent: 0;
+}
+/* 排隊中：琥珀充能斜紋流動（取代琥珀鍵面） */
+.quick.queueing,
+.quick.queueing:hover {
   color: var(--accent);
+  text-shadow: none;
+  background:
+    repeating-linear-gradient(-45deg, rgba(255, 179, 31, 0.16) 0 12px, transparent 12px 24px),
+    linear-gradient(180deg, #262b34, #15181e 55%, #101319);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 0 0 1px rgba(255, 179, 31, 0.4);
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.85)) drop-shadow(0 6px 12px rgba(0, 0, 0, 0.4));
+  animation: chargeFlow 0.8s linear infinite;
 }
-.quick:disabled {
-  opacity: 0.5;
-  cursor: default;
+/* -45 度、24px 週期的斜紋 → 水平位移 24×√2 ≈ 33.94px 可無縫循環 */
+@keyframes chargeFlow {
+  to {
+    background-position: 33.94px 0, 0 0;
+  }
 }
-.hint {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
+
+/* ---- 房號加入 ---- */
 .join-row {
   display: flex;
-  gap: 8px;
-  margin: 12px 0;
+  gap: 10px;
+  margin: 0 0 12px;
 }
-.join-row input {
+.code-input {
   flex: 1;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  color: var(--text);
-  padding: 10px 12px;
-  font-size: 15px;
-  letter-spacing: 2px;
+  min-width: 0;
+  font-family: var(--f-d);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
 }
-.error {
-  color: var(--red);
+.code-input::placeholder {
+  font-family: var(--f-b);
   font-size: 13px;
-  margin: -4px 0 10px;
+  letter-spacing: 0.16em;
+  text-transform: none;
 }
-.join-row button,
-.actions button {
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+.join-btn {
+  flex: none;
+  letter-spacing: 0.2em;
   padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
 }
-.join-row button:disabled,
-.actions button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 12px;
+  font-size: 12.5px;
+  color: var(--red);
 }
+
+/* ---- 開房動作列 ---- */
 .actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
-.actions .primary {
-  background: var(--accent);
-  color: #1a1207;
-  border-color: var(--accent);
+.act-btn {
+  flex: 1 1 auto;
 }
-.actions .bot {
-  border-color: var(--blue);
+.bot-btn,
+.bot-btn:hover {
   color: var(--blue);
 }
+
+/* ---- 公開房間勾選：金屬方形勾選鍵 ---- */
 .pub-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+  min-height: 40px;
   margin-top: 10px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pub-check {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.pub-box {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  color: transparent;
+  background: linear-gradient(180deg, #0b0d12, #14171e 80%);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85), inset 0 0 0 1px rgba(170, 180, 196, 0.25);
+  transition: color 0.12s, box-shadow 0.12s;
+}
+.pub-check:checked + .pub-box {
+  color: var(--accent);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85), inset 0 0 0 1px rgba(255, 179, 31, 0.55);
+}
+.pub-check:focus-visible + .pub-box {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.pub-txt {
   font-size: 12.5px;
   color: var(--muted);
-  cursor: pointer;
+  line-height: 1.5;
 }
-.pub-toggle input {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--accent);
-}
+
+/* ---- 公開房間列表 ---- */
 .room-list {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-.room-list li {
+.room-card {
+  --cut: 10px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 11px 12px 11px 14px;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4));
 }
-.room-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.room-host {
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.room-code {
+  flex: none;
+  min-width: 92px;
+  font-family: var(--f-d);
+  font-weight: 800;
+  font-size: 21px;
+  letter-spacing: 0.18em;
+  color: var(--white-hot);
+  text-shadow: 0 0 10px rgba(255, 179, 31, 0.35);
 }
 .room-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.room-host {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.host-tag {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  margin-right: 5px;
+}
+.room-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wait {
+  font-size: 10px;
+  padding: 1px 7px;
+}
+/* 等待中：琥珀菱形呼吸燈 */
+.wait::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  animation: waitPulse 1.2s infinite;
+}
+@keyframes waitPulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+.ago {
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.room-join {
+  flex: none;
+  min-height: 40px;
+  padding: 8px 13px;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  gap: 6px;
+}
+
+/* ---- 空狀態：鋼板銘文 ---- */
+.empty {
+  padding: 26px 12px 24px;
+  text-align: center;
+  background:
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.012) 0 3px, transparent 3px 9px),
+    linear-gradient(180deg, #171a21, #11141a);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), inset 0 0 0 1px rgba(50, 56, 69, 0.6);
+}
+.empty-title {
+  margin: 0;
+  font-family: var(--f-d);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.4em;
+  text-indent: 0.4em;
+  color: #525b6b;
+  /* 蝕刻感：上亮下暗 */
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), 0 -1px 1px rgba(0, 0, 0, 0.8);
+}
+.empty-sub {
+  margin: 7px 0 0;
   font-size: 11.5px;
+  letter-spacing: 0.2em;
   color: var(--muted);
 }
-.join {
-  background: var(--accent);
-  color: #1a1207;
-  border: none;
-  border-radius: 9px;
-  padding: 9px 14px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  flex-shrink: 0;
+
+/* ---- 窄螢幕：房卡縮一級 ---- */
+@media (max-width: 379.98px) {
+  .room-code {
+    min-width: 82px;
+    font-size: 18px;
+  }
+  .room-card {
+    gap: 9px;
+  }
 }
 </style>

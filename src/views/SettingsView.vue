@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref, watch } from "vue";
 import { useAuth } from "../store/authStore";
 import { PRESET_LABELS } from "../physics/presets";
+import BbIcon from "../components/ui/BbIcon.vue";
 
 const auth = useAuth();
 
@@ -17,11 +18,11 @@ interface UserSettings {
 
 const SPECIAL_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "（無）" },
-  { value: "rush", label: "🗡️ 衝刺突進" },
-  { value: "blast", label: "💥 衝擊" },
-  { value: "dash", label: "💨 高速移動" },
-  { value: "vortex", label: "🌀 旋渦" },
-  { value: "clone", label: "👥 分身" },
+  { value: "rush", label: "衝刺突進" },
+  { value: "blast", label: "衝擊" },
+  { value: "dash", label: "高速移動" },
+  { value: "vortex", label: "旋渦" },
+  { value: "clone", label: "分身" },
 ];
 
 const form = reactive<UserSettings>({
@@ -104,75 +105,111 @@ async function save() {
 
 <template>
   <div class="settings">
-    <section class="card">
-      <h2>👤 個人設定</h2>
+    <section class="plate plate--rivets card">
+      <h2 class="page-title"><BbIcon name="person-circle" :size="18" />個人設定</h2>
       <div v-if="loading" class="loading">載入中…</div>
       <template v-else>
         <div class="profile" v-if="auth.user.value">
-          <img v-if="auth.user.value.picture" :src="auth.user.value.picture" class="avatar" alt="" referrerpolicy="no-referrer" />
+          <span class="avatar-frame">
+            <img
+              v-if="auth.user.value.picture"
+              :src="auth.user.value.picture"
+              class="avatar"
+              alt=""
+              referrerpolicy="no-referrer"
+            />
+            <BbIcon v-else name="person" :size="22" />
+          </span>
           <div class="who">
             <div class="gname">{{ auth.user.value.name }}</div>
             <div class="gmail">{{ auth.user.value.email }}</div>
           </div>
+          <span v-if="auth.isAdmin.value" class="f-badge f-badge--amber admin-badge">
+            <BbIcon name="shield" :size="11" />管理員
+          </span>
         </div>
+        <div class="hazard hazard--thin"></div>
 
-        <label class="row">
-          <span>暱稱（對戰顯示用）</span>
-          <input v-model="form.nickname" maxlength="20" placeholder="輸入暱稱" />
+        <label class="row nick-row">
+          <span class="row-label">暱稱（對戰顯示用）</span>
+          <input v-model="form.nickname" maxlength="20" placeholder="輸入暱稱" class="f-input" />
         </label>
 
-        <div class="group-title">⚔️ 預設陀螺配置（進房自動套用）</div>
+        <div class="f-label sect"><BbIcon name="lightning" :size="13" />預設陀螺配置（進房自動套用）</div>
         <div class="grid2">
           <label class="row">
-            <span>類型</span>
-            <select v-model="form.defaultType">
-              <option v-for="(label, key) in PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
-            </select>
+            <span class="row-label">類型</span>
+            <span class="f-select">
+              <select v-model="form.defaultType">
+                <option v-for="(label, key) in PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
+              </select>
+            </span>
           </label>
           <label class="row">
-            <span>必殺技</span>
-            <select v-model="form.defaultSpecial">
-              <option v-for="o in SPECIAL_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
+            <span class="row-label">必殺技</span>
+            <span class="f-select">
+              <select v-model="form.defaultSpecial">
+                <option v-for="o in SPECIAL_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </span>
           </label>
         </div>
         <p class="hint">旋向由房間決定：先手（紅）固定右旋、後手（藍）固定左旋——保證每場反向對撞。</p>
 
-        <div class="group-title">🎮 操作偏好</div>
+        <div class="f-label sect"><BbIcon name="controller" :size="13" />操作偏好</div>
         <div class="grid2">
           <label class="row">
-            <span>發射模式</span>
-            <select v-model="form.launchMode">
-              <option value="sling">🏹 拉弓（拉的距離決定力道）</option>
-              <option value="flick">🌀 甩動（放手瞬間速度決定）</option>
-            </select>
+            <span class="row-label">發射模式</span>
+            <span class="f-select">
+              <select v-model="form.launchMode">
+                <option value="sling">拉弓（拉的距離決定力道）</option>
+                <option value="flick">甩動（放手瞬間速度決定）</option>
+              </select>
+            </span>
           </label>
           <label class="row">
-            <span>回放倍速</span>
-            <select v-model.number="form.replaySpeed">
-              <option :value="1">1x</option>
-              <option :value="2">2x</option>
-              <option :value="3">3x</option>
-            </select>
+            <span class="row-label">回放倍速</span>
+            <span class="f-select">
+              <select v-model.number="form.replaySpeed">
+                <option :value="1">1x</option>
+                <option :value="2">2x</option>
+                <option :value="3">3x</option>
+              </select>
+            </span>
           </label>
           <label class="row check">
             <input type="checkbox" v-model="form.sfx" />
+            <BbIcon :name="form.sfx ? 'volume-up' : 'volume-mute'" :size="15" />
             <span>音效</span>
           </label>
         </div>
 
-        <div class="group-title">🏆 戰績</div>
+        <div class="f-label sect"><BbIcon name="trophy" :size="13" />戰績</div>
         <template v-if="record && record.total > 0">
-          <div class="rec-summary">
-            <span class="rec-num win">{{ record.wins }} 勝</span>
-            <span class="rec-num lose">{{ record.losses }} 敗</span>
-            <span class="rec-num">共 {{ record.total }} 場</span>
-            <span class="rec-num rate">勝率 {{ Math.round((record.wins / record.total) * 100) }}%</span>
+          <div class="stats-band">
+            <BbIcon name="trophy" :size="24" class="band-ic" />
+            <div class="stats-num">
+              <b>{{ record.wins }}</b><i>勝</i>
+              <b class="lose">{{ record.losses }}</b><i>敗</i>
+              <i class="total">共 {{ record.total }} 場</i>
+            </div>
+            <div class="winrate">
+              <b>{{ Math.round((record.wins / record.total) * 100) }}%</b>
+              <span>WIN RATE</span>
+            </div>
+          </div>
+          <div class="wr-bar">
+            <b :style="{ width: Math.round((record.wins / record.total) * 100) + '%' }"></b>
           </div>
           <ul class="rec-list">
             <li v-for="(m, i) in record.matches" :key="i">
-              <span class="rec-result" :class="m.won ? 'win' : 'lose'">{{ m.won ? "勝" : "敗" }}</span>
-              <span class="rec-opp">vs {{ m.opponent }}<i v-if="m.vsBot" class="rec-bot">BOT</i></span>
+              <span class="f-badge res-badge" :class="m.won ? 'f-badge--ok' : 'f-badge--red'">
+                {{ m.won ? "勝" : "敗" }}
+              </span>
+              <span class="rec-opp">
+                <span class="vs">VS</span>{{ m.opponent }}
+                <span v-if="m.vsBot" class="f-badge f-badge--blue bot-tag"><BbIcon name="controller" :size="10" />BOT</span>
+              </span>
               <span class="rec-score">{{ m.myScore }} : {{ m.oppScore }}</span>
               <span class="rec-time">{{ matchTime(m.finishedAt) }}</span>
             </li>
@@ -182,8 +219,10 @@ async function save() {
 
         <p v-if="error" class="error">{{ error }}</p>
         <div class="actions">
-          <button class="primary" :disabled="saving" @click="save">{{ saving ? "儲存中…" : "💾 儲存設定" }}</button>
-          <span v-if="savedAt && !error" class="saved">✓ 已儲存</span>
+          <button class="f-btn f-btn--primary" :disabled="saving" @click="save">
+            <BbIcon name="floppy" :size="15" />{{ saving ? "儲存中…" : "儲存設定" }}
+          </button>
+          <span v-if="savedAt && !error" class="saved"><BbIcon name="check" :size="14" />已儲存</span>
         </div>
       </template>
     </section>
@@ -192,138 +231,235 @@ async function save() {
 
 <style scoped>
 .settings {
-  max-width: 560px;
+  max-width: 480px;
   margin: 0 auto;
 }
 .card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 20px 22px;
+  padding: 16px 14px 18px;
 }
-.card h2 {
-  margin: 0 0 14px;
+/* ---- 頁標 ---- */
+.page-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 2px 2px 12px;
+  font-family: var(--f-d);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+.page-title .bb-icon {
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px rgba(255, 179, 31, 0.45));
 }
 .loading {
   color: var(--muted);
   padding: 20px 0;
+  font-size: 13px;
+  letter-spacing: 0.08em;
 }
+/* ---- Google 帳號列 ---- */
 .profile {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
 }
-.avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
+.avatar-frame {
+  /* 切角金屬框（與 plate 同語彙），頭像 / 預設 person 圖示都收在框內 */
+  width: 48px;
+  height: 48px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  background: linear-gradient(180deg, #4d5564, #23272f 45%, #0d1016);
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 24, 0.35);
+  color: var(--steel);
+}
+.avatar-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+.who {
+  flex: 1;
+  min-width: 0;
 }
 .gname {
-  font-weight: 700;
+  font-family: var(--f-d);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.07em;
 }
 .gmail {
+  margin-top: 2px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.group-title {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--accent);
-  margin: 18px 0 8px;
+.admin-badge {
+  flex: none;
+}
+/* ---- 表單 ---- */
+.nick-row {
+  margin-top: 12px;
+}
+.sect {
+  margin-top: 18px;
 }
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px 14px;
+  gap: 10px 12px;
 }
 .row {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  font-size: 12.5px;
-  color: var(--muted);
+  gap: 6px;
+  min-width: 0;
 }
-.row input[type="text"],
-.row input:not([type]),
-.row select {
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 9px 11px;
-  font-size: 14px;
+.row-label {
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
 }
 .row.check {
   flex-direction: row;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  min-height: 40px;
+  font-size: 13.5px;
+  font-weight: 700;
   color: var(--text);
-  padding-top: 18px;
 }
 .row.check input {
-  width: 16px;
-  height: 16px;
+  width: 17px;
+  height: 17px;
   accent-color: var(--accent);
 }
-.hint {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 0;
-}
-.rec-summary {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-.rec-num {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--muted);
-}
-.rec-num.win {
-  color: #6ad08a;
-}
-.rec-num.lose {
-  color: var(--red);
-}
-.rec-num.rate {
+.row.check .bb-icon {
   color: var(--accent);
 }
+/* ---- 低調鋼板提示小字 ---- */
+.hint {
+  margin: 10px 0 0;
+  padding: 8px 11px;
+  font-size: 12px;
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: linear-gradient(180deg, #10131a, #0c0f15);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  box-shadow: inset 0 0 0 1px rgba(170, 180, 196, 0.12);
+}
+/* ---- 戰績計數板（金屬熔光帶） ---- */
+.stats-band {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background:
+    linear-gradient(90deg, rgba(255, 122, 24, 0.14), transparent 60%),
+    linear-gradient(180deg, #10131a, #0b0d12);
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+  box-shadow: inset 0 0 0 1px rgba(255, 179, 31, 0.16);
+}
+.band-ic {
+  flex: none;
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px rgba(255, 179, 31, 0.5));
+}
+.stats-num {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.stats-num b {
+  font-family: var(--f-d);
+  font-weight: 800;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--white-hot);
+  font-variant-numeric: tabular-nums;
+}
+.stats-num b.lose {
+  color: var(--red);
+}
+.stats-num i {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.18em;
+}
+.stats-num i.total {
+  margin-left: 2px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.winrate {
+  flex: none;
+  text-align: right;
+}
+.winrate b {
+  font-family: var(--f-d);
+  font-weight: 800;
+  font-size: 21px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.winrate span {
+  display: block;
+  font-family: var(--f-d);
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--muted);
+}
+.wr-bar {
+  height: 4px;
+  margin-top: 8px;
+  background: #05060a;
+  overflow: hidden;
+  display: flex;
+}
+.wr-bar b {
+  background: linear-gradient(90deg, var(--lava), var(--accent));
+  box-shadow: 0 0 8px rgba(255, 122, 24, 0.6);
+}
+/* ---- 戰績清單 ---- */
 .rec-list {
   list-style: none;
-  margin: 0;
+  margin: 10px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 260px;
+  gap: 7px;
+  max-height: 280px;
   overflow-y: auto;
 }
 .rec-list li {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 7px 11px;
-  font-size: 13px;
+  padding: 8px 11px;
+  font-size: 12.5px;
+  background: linear-gradient(180deg, #171a21, #11141a);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
-.rec-result {
-  font-weight: 800;
-  flex-shrink: 0;
-}
-.rec-result.win {
-  color: #6ad08a;
-}
-.rec-result.lose {
-  color: var(--red);
+.res-badge {
+  flex: none;
+  letter-spacing: 0;
 }
 .rec-opp {
   flex: 1;
@@ -331,29 +467,44 @@ async function save() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
-.rec-bot {
-  font-style: normal;
+.rec-opp .vs {
+  font-family: var(--f-d);
+  font-weight: 600;
   font-size: 10px;
-  color: var(--blue);
-  border: 1px solid var(--blue);
-  border-radius: 5px;
-  padding: 0 4px;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  margin-right: 5px;
+}
+.bot-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  gap: 3px;
   margin-left: 6px;
+  vertical-align: 1px;
 }
 .rec-score {
+  flex: none;
+  font-family: var(--f-d);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  color: var(--white-hot);
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  flex-shrink: 0;
 }
 .rec-time {
-  font-size: 11px;
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.04em;
   color: var(--muted);
-  flex-shrink: 0;
 }
+/* ---- 錯誤 / 儲存 ---- */
 .error {
   color: var(--red);
   font-size: 13px;
+  margin: 12px 0 0;
 }
 .actions {
   display: flex;
@@ -361,25 +512,16 @@ async function save() {
   gap: 12px;
   margin-top: 18px;
 }
-.actions .primary {
-  background: var(--accent);
-  color: #1a1207;
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  padding: 10px 18px;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.actions .primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
 .saved {
-  color: #6ad08a;
-  font-size: 13.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
 }
-@media (max-width: 560px) {
+@media (max-width: 420px) {
   .grid2 {
     grid-template-columns: 1fr;
   }

@@ -20,10 +20,10 @@ onBeforeUnmount(() => remoteApi?.dispose?.());
 
 <template>
   <div class="mode-bar">
-    <button :class="{ active: mode === 'online' }" @click="mode = 'online'">🌐 線上設定（D1）</button>
-    <button :class="{ active: mode === 'local' }" @click="mode = 'local'">💻 本機測試（localStorage）</button>
+    <button :class="{ active: mode === 'online' }" @click="mode = 'online'">線上設定（D1）</button>
+    <button :class="{ active: mode === 'local' }" @click="mode = 'local'">本機測試（localStorage）</button>
     <span class="mode-hint">
-      {{ mode === "online" ? "正式線上對戰用的全域屬性/必殺技（所有玩家共用）" : "測試頁（🧪 / 📱）用的本機數值" }}
+      {{ mode === "online" ? "正式線上對戰用的全域屬性/必殺技（所有玩家共用）" : "測試頁用的本機數值" }}
     </span>
   </div>
   <BeybladeAdmin

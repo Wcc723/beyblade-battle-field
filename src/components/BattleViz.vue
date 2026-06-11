@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ArenaSvg from "./ArenaSvg.vue";
+import BbIcon from "./ui/BbIcon.vue";
 import { useBattle } from "../composables/useBattle";
 
 // 桌面版：對戰邏輯全部來自 useBattle composable（與手機版同源）。
@@ -31,7 +32,7 @@ const {
       </div>
 
       <div class="player-card" :class="{ dim: phase !== 'aim-A' && !!launchA }" :style="{ borderColor: setupA.color }">
-        <h3 :style="{ color: setupA.color }">🔴 紅方 A <span v-if="launchA" class="ready">✓ 已發射</span></h3>
+        <h3 :style="{ color: setupA.color }">紅方 A <span v-if="launchA" class="ready"><BbIcon name="check" :size="12" /> 已發射</span></h3>
         <label class="field">類型
           <select v-model="setupA.preset" :disabled="!!launchA">
             <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
@@ -39,25 +40,25 @@ const {
         </label>
         <label class="field">旋向
           <select v-model.number="setupA.spinDir" :disabled="!!launchA">
-            <option :value="1">↺ 逆時針（右旋）</option>
-            <option :value="-1">↻ 順時針（左旋）</option>
+            <option :value="1">逆時針（右旋）</option>
+            <option :value="-1">順時針（左旋）</option>
           </select>
         </label>
         <label class="field">必殺技
           <select v-model="setupA.special" :disabled="!!launchA">
             <option value="">無</option>
-            <option value="rush">🗡️ 衝刺突進</option>
-            <option value="blast">💥 衝擊</option>
-            <option value="dash">⚡ 高速移動</option>
-            <option value="vortex">🌀 旋渦</option>
-            <option value="clone">👥 分身</option>
+            <option value="rush">衝刺突進</option>
+            <option value="blast">衝擊</option>
+            <option value="dash">高速移動</option>
+            <option value="vortex">旋渦</option>
+            <option value="clone">分身</option>
           </select>
         </label>
-        <p v-if="setupA.special" class="sp-info">⚡ {{ specialInfo(setupA.special) }}</p>
+        <p v-if="setupA.special" class="sp-info"><BbIcon name="lightning" :size="12" /> {{ specialInfo(setupA.special) }}</p>
       </div>
 
       <div class="player-card" :class="{ dim: phase === 'aim-A' }" :style="{ borderColor: setupB.color }">
-        <h3 :style="{ color: setupB.color }">🔵 藍方 B <span v-if="launchB" class="ready">✓ 已發射</span></h3>
+        <h3 :style="{ color: setupB.color }">藍方 B <span v-if="launchB" class="ready"><BbIcon name="check" :size="12" /> 已發射</span></h3>
         <label class="field">類型
           <select v-model="setupB.preset" :disabled="!!launchB">
             <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
@@ -65,21 +66,21 @@ const {
         </label>
         <label class="field">旋向
           <select v-model.number="setupB.spinDir" :disabled="!!launchB">
-            <option :value="1">↺ 逆時針（右旋）</option>
-            <option :value="-1">↻ 順時針（左旋）</option>
+            <option :value="1">逆時針（右旋）</option>
+            <option :value="-1">順時針（左旋）</option>
           </select>
         </label>
         <label class="field">必殺技
           <select v-model="setupB.special" :disabled="!!launchB">
             <option value="">無</option>
-            <option value="rush">🗡️ 衝刺突進</option>
-            <option value="blast">💥 衝擊</option>
-            <option value="dash">⚡ 高速移動</option>
-            <option value="vortex">🌀 旋渦</option>
-            <option value="clone">👥 分身</option>
+            <option value="rush">衝刺突進</option>
+            <option value="blast">衝擊</option>
+            <option value="dash">高速移動</option>
+            <option value="vortex">旋渦</option>
+            <option value="clone">分身</option>
           </select>
         </label>
-        <p v-if="setupB.special" class="sp-info">⚡ {{ specialInfo(setupB.special) }}</p>
+        <p v-if="setupB.special" class="sp-info"><BbIcon name="lightning" :size="12" /> {{ specialInfo(setupB.special) }}</p>
       </div>
 
       <label class="arena-info">場地：
@@ -87,8 +88,8 @@ const {
           <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
         </select>
       </label>
-      <button class="reset-btn" @click="resetMatch">↺ 重新對戰</button>
-      <button class="reset-btn" @click="sfxEnabled = !sfxEnabled">{{ sfxEnabled ? "🔊 音效開" : "🔇 音效關" }}</button>
+      <button class="reset-btn" @click="resetMatch"><BbIcon name="arrow-repeat" :size="14" /> 重新對戰</button>
+      <button class="reset-btn" @click="sfxEnabled = !sfxEnabled"><BbIcon :name="sfxEnabled ? 'volume-up' : 'volume-mute'" :size="14" /> {{ sfxEnabled ? "音效開" : "音效關" }}</button>
       <p class="hint">{{ hintText }}</p>
     </div>
 
@@ -127,7 +128,7 @@ const {
           @pointerup="onPointerUp"
           @pointercancel="onPointerUp"
         ></canvas>
-        <div v-if="slowmo && playing" class="slowmo-badge">⏱ SLOW-MO</div>
+        <div v-if="slowmo && playing" class="slowmo-badge"><BbIcon name="hourglass" :size="12" /> SLOW-MO</div>
         <div v-if="isFinished()" class="winner-banner" :class="{ champion: matchOver }">
           <template v-if="matchOver">{{ championLabel() }}</template>
           <template v-else>{{ roundResultLabel() }}</template>
@@ -135,7 +136,7 @@ const {
       </div>
 
       <div class="replay" v-if="phase === 'playing' && result">
-        <button class="ctrl" @click="togglePlay">{{ playing ? "⏸" : "▶" }}</button>
+        <button class="ctrl" @click="togglePlay"><BbIcon :name="playing ? 'pause' : 'play'" :size="16" /></button>
         <input class="scrub" type="range" min="0" :max="result.frames.length - 1" step="1" v-model.number="playhead" @mousedown="pause" />
         <span class="time">{{ currentTime() }}s / {{ result.duration.toFixed(2) }}s</span>
         <select v-model.number="speed" class="speed">
@@ -145,8 +146,8 @@ const {
           <option :value="2">2x</option>
           <option :value="3">3x</option>
         </select>
-        <button v-if="matchOver" class="again" @click="resetMatch">🔄 重新比賽</button>
-        <button v-else class="again" @click="nextRound">下一回合 →</button>
+        <button v-if="matchOver" class="again" @click="resetMatch"><BbIcon name="arrow-repeat" :size="14" /> 重新比賽</button>
+        <button v-else class="again" @click="nextRound">下一回合 <BbIcon name="arrow-right" :size="14" /></button>
       </div>
     </div>
   </div>
@@ -166,7 +167,7 @@ const {
 }
 .phase-banner {
   background: var(--accent);
-  color: #1a1207;
+  color: var(--bg);
   font-weight: 800;
   font-size: 16px;
   text-align: center;
@@ -196,7 +197,7 @@ const {
 }
 .mode-toggle button.active {
   background: var(--accent);
-  color: #1a1207;
+  color: var(--bg);
   border-color: var(--accent);
 }
 .player-card {
@@ -219,7 +220,7 @@ const {
 }
 .ready {
   font-size: 12px;
-  color: #6ad08a;
+  color: var(--ok);
 }
 .sp-info {
   margin: -2px 0 8px;
@@ -437,7 +438,7 @@ canvas {
 }
 .again {
   background: var(--accent);
-  color: #1a1207;
+  color: var(--bg);
   border: none;
   border-radius: 9px;
   padding: 8px 14px;

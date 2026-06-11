@@ -1,0 +1,454 @@
+/* ============================================================
+   BURST FORGE 設計系統 — 全站 tokens / 基底 / 共用 class
+   視覺方向：戰鬥陀螺 X 工業金屬鍛造
+   （語彙來源：public/design/v2-burst-metal.html 範本）
+   沿用舊變數名（--bg/--panel/--accent…），未換裝頁面自動換皮。
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+  /* ---- 色票 ---- */
+  --bg: #0c0e12;        /* ink 底 */
+  --panel: #1b1e24;     /* iron 面板 */
+  --panel-2: #22262e;
+  --panel-3: #2b303a;
+  --line: #323845;
+  --text: #dfe5ee;
+  --muted: #8f99a8;
+  --steel: #aab4c4;
+  --accent: #ffb31f;    /* 琥珀能量（取代舊金 #ffd166） */
+  --lava: #ff7a18;      /* 熔岩橘 */
+  --white-hot: #fff3d6; /* 白熱 */
+  --red: #e8442e;
+  --blue: #2e9fe8;
+  --ok: #57d96b;
+  /* ---- 深色輔助（漸層用） ---- */
+  --red-deep: #8a1d10;
+  --blue-deep: #10456e;
+  /* ---- 字體 ---- */
+  --f-d: "Big Shoulders Display", "Noto Sans TC", sans-serif; /* 顯示字 / 數字 */
+  --f-b: "Noto Sans TC", sans-serif;                          /* 內文 */
+}
+
+/* ============================================================
+   全域基底 + 輕量 reset
+   ============================================================ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--f-b);
+  color: var(--text);
+  /* ink 底 + 極淡六角網格（三向細線）+ 碳纖維斜紋 + 頂部熔爐微光 */
+  background:
+    radial-gradient(900px 480px at 50% -120px, rgba(255, 122, 24, 0.1), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(170, 180, 196, 0.03) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(60deg, rgba(170, 180, 196, 0.022) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(-60deg, rgba(170, 180, 196, 0.022) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.014) 0 2px, transparent 2px 6px),
+    var(--bg);
+}
+/* 表單控件 / 按鈕基礎 reset：字體與顏色跟著版面走 */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  cursor: pointer;
+}
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+::selection {
+  background: var(--accent);
+  color: #15100a;
+}
+
+/* ============================================================
+   .plate — 切角金屬面板
+   作法：元素本體＝bevel 外圈漸層 + clip-path 切角；
+   ::before 內縮 1px 再切一次＝鐵灰內板（z-index:-1 墊在內容下）。
+   變體 .plate--flush：無內距（內容貼齊，如 canvas / 滿版列表）。
+   可選 .plate--rivets：四角鉚釘點綴。
+   ============================================================ */
+.plate {
+  --cut: 14px;
+  position: relative;
+  isolation: isolate; /* 讓 ::before 的 z-index:-1 不會沉到面板背景之後 */
+  padding: 14px;
+  clip-path: polygon(
+    var(--cut) 0,
+    100% 0,
+    100% calc(100% - var(--cut)),
+    calc(100% - var(--cut)) 100%,
+    0 100%,
+    0 var(--cut)
+  );
+  background: linear-gradient(180deg, #4d5564, #23272f 16%, #171a21 60%, #03040a);
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.55));
+}
+.plate::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  pointer-events: none;
+  clip-path: polygon(
+    calc(var(--cut) - 1px) 0,
+    100% 0,
+    100% calc(100% - var(--cut) + 1px),
+    calc(100% - var(--cut) + 1px) 100%,
+    0 100%,
+    0 calc(var(--cut) - 1px)
+  );
+  background:
+    radial-gradient(140% 90% at 50% 0%, rgba(255, 255, 255, 0.05), transparent 50%),
+    linear-gradient(180deg, #272c36, var(--panel) 42%, #14161c);
+}
+.plate--flush {
+  padding: 0;
+}
+.plate--rivets::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 11px 11px, #d9e0ea 0 1px, #646d7c 1.4px, #0d1016 2.3px, transparent 3.2px),
+    radial-gradient(circle at calc(100% - 11px) 11px, #d9e0ea 0 1px, #646d7c 1.4px, #0d1016 2.3px, transparent 3.2px),
+    radial-gradient(circle at 11px calc(100% - 11px), #d9e0ea 0 1px, #646d7c 1.4px, #0d1016 2.3px, transparent 3.2px),
+    radial-gradient(circle at calc(100% - 11px) calc(100% - 11px), #d9e0ea 0 1px, #646d7c 1.4px, #0d1016 2.3px, transparent 3.2px);
+}
+
+/* ============================================================
+   .hazard — 黃黑警示斜紋帶（divider / 裝飾）
+   ============================================================ */
+.hazard {
+  height: 6px;
+  background: repeating-linear-gradient(-45deg, var(--accent) 0 9px, #14161b 9px 18px);
+  opacity: 0.85;
+}
+.hazard--thin {
+  height: 3px;
+  opacity: 0.6;
+}
+
+/* ============================================================
+   .f-label — 小節標（display 字、uppercase、琥珀、前置短橫）
+   ============================================================ */
+.f-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-family: var(--f-d);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.f-label::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(255, 179, 31, 0.5);
+}
+
+/* ============================================================
+   .f-btn — 機台實體鍵
+   切角 + 鍵帽厚度（drop-shadow）+ :active 下沉。
+   變體：--primary 琥珀 / --danger 紅 / --ghost 描邊。
+   disabled：黃黑斜紋鎖定態。
+   ============================================================ */
+.f-btn {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 10px 18px;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--f-d);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  text-decoration: none; /* RouterLink 也能直接當機台鍵 */
+  background: linear-gradient(180deg, #3c434f, #23272f 55%, #181b21);
+  clip-path: polygon(
+    8px 0,
+    100% 0,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    0 100%,
+    0 8px
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -3px 5px rgba(0, 0, 0, 0.6);
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.85)) drop-shadow(0 6px 12px rgba(0, 0, 0, 0.4));
+  transition: transform 0.07s, filter 0.07s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.f-btn:hover {
+  color: var(--accent);
+}
+.f-btn:active:not(:disabled) {
+  transform: translateY(2px);
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.85));
+}
+/* 琥珀主鍵 */
+.f-btn--primary {
+  color: #1a0d02;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5), transparent 38%),
+    linear-gradient(180deg, #ffc954, var(--accent) 40%, var(--lava) 88%, #c9540c);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), inset 0 -4px 6px rgba(150, 50, 0, 0.55);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.f-btn--primary:hover {
+  color: #1a0d02;
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.85)) drop-shadow(0 0 18px rgba(255, 122, 24, 0.5));
+}
+/* 紅色危險鍵 */
+.f-btn--danger {
+  color: #ffe6e0;
+  background: linear-gradient(180deg, #ff7a64, var(--red) 42%, var(--red-deep));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -4px 6px rgba(90, 10, 0, 0.6);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.f-btn--danger:hover {
+  color: #fff;
+}
+/* 描邊次要鍵：本體＝描邊漸層、::before 內縮 1px＝暗底 */
+.f-btn--ghost {
+  color: var(--steel);
+  background: linear-gradient(180deg, rgba(170, 180, 196, 0.45), rgba(170, 180, 196, 0.16));
+  box-shadow: none;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
+}
+.f-btn--ghost::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  clip-path: polygon(
+    7px 0,
+    100% 0,
+    100% calc(100% - 7px),
+    calc(100% - 7px) 100%,
+    0 100%,
+    0 7px
+  );
+  background: linear-gradient(180deg, #181b22, #10131a);
+}
+.f-btn--ghost:active:not(:disabled) {
+  filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0.6));
+}
+/* 黃黑斜紋鎖定態 */
+.f-btn:disabled {
+  cursor: not-allowed;
+  color: #4c5564;
+  background: repeating-linear-gradient(45deg, #171a20 0 8px, #13161b 8px 16px);
+  box-shadow: inset 0 0 0 1px rgba(76, 85, 100, 0.3);
+  filter: none;
+  text-shadow: none;
+  transform: none;
+}
+.f-btn:disabled::before {
+  content: none;
+}
+
+/* ============================================================
+   .f-input / .f-select — 金屬內凹表單控件
+   select 用 <span class="f-select"> 包原生 select，::after 畫自訂箭頭。
+   ============================================================ */
+.f-input,
+.f-select select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  outline: 0;
+  min-height: 40px;
+  padding: 10px 14px;
+  font-family: var(--f-b);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: #eef2f8;
+  background: linear-gradient(180deg, #0b0d12, #14171e 80%);
+  clip-path: polygon(
+    8px 0,
+    100% 0,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    0 100%,
+    0 8px
+  );
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.85), inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+  caret-color: var(--accent);
+}
+.f-input::placeholder {
+  color: #4c5564;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+}
+.f-input:focus,
+.f-select select:focus {
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 1.5px rgba(255, 122, 24, 0.6);
+}
+.f-select {
+  position: relative;
+  display: block;
+}
+.f-select select {
+  cursor: pointer;
+  padding-right: 34px;
+}
+.f-select::after {
+  /* 自訂下拉箭頭 */
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -6px;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.f-select select option {
+  background: #14171e;
+  color: #eef2f8;
+}
+
+/* ============================================================
+   .f-badge — 狀態章（--red / --blue / --ok / --amber）
+   ============================================================ */
+.f-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  font-family: var(--f-d);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--steel);
+  border: 1px solid rgba(170, 180, 196, 0.4);
+  background: rgba(170, 180, 196, 0.08);
+}
+.f-badge--red {
+  color: var(--red);
+  border-color: rgba(232, 68, 46, 0.5);
+  background: rgba(232, 68, 46, 0.08);
+}
+.f-badge--blue {
+  color: var(--blue);
+  border-color: rgba(46, 159, 232, 0.5);
+  background: rgba(46, 159, 232, 0.08);
+}
+.f-badge--ok {
+  color: var(--ok);
+  border-color: rgba(87, 217, 107, 0.5);
+  background: rgba(87, 217, 107, 0.08);
+}
+.f-badge--amber {
+  color: var(--accent);
+  border-color: rgba(255, 179, 31, 0.5);
+  background: rgba(255, 179, 31, 0.08);
+}
+
+/* ============================================================
+   .seg — segmented control（機台撥桿，active 琥珀）
+   active 寫法：button 加 .on 或 aria-pressed="true"
+   ============================================================ */
+.seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: 3px;
+  background: linear-gradient(180deg, #05060a, #14171e);
+  clip-path: polygon(
+    8px 0,
+    100% 0,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    0 100%,
+    0 8px
+  );
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.85);
+}
+.seg button {
+  border: 0;
+  cursor: pointer;
+  min-height: 40px;
+  padding: 9px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-family: var(--f-b);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+  background: transparent;
+  clip-path: polygon(
+    6px 0,
+    100% 0,
+    100% calc(100% - 6px),
+    calc(100% - 6px) 100%,
+    0 100%,
+    0 6px
+  );
+  transition: color 0.15s, background 0.15s;
+}
+.seg button.on,
+.seg button[aria-pressed="true"] {
+  color: #16181d;
+  background: linear-gradient(180deg, #ffd97a, var(--accent) 45%, var(--lava));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -3px 5px rgba(160, 60, 0, 0.5);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.seg button:not(.on):hover {
+  color: var(--steel);
+}
+
+/* ============================================================
+   降低動態：關閉裝飾動畫（遊戲畫面是 canvas/rAF，不受影響）
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

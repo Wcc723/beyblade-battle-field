@@ -10,7 +10,7 @@ import type { ArenaConfig, BeybladeInit, BeybladeStats, SpecialConfig, SpecialKi
 import { DEFAULT_SCALES } from "../physics/engine";
 
 export type Side = "A" | "B";
-export const SIDE_COLORS: Record<Side, string> = { A: "#ff5d5d", B: "#5db4ff" };
+export const SIDE_COLORS: Record<Side, string> = { A: "#e8442e", B: "#2e9fe8" };
 
 /**
  * 線上對戰旋向固定（不開放調整）：先手 A＝右旋、後手 B＝左旋。
@@ -41,7 +41,7 @@ export interface PublicPlayer {
 
 /** 內建 BOT 的假 uid（不會出現在 users 表） */
 export const BOT_UID = -1;
-export const BOT_NICKNAME = "🤖 陪練 BOT";
+export const BOT_NICKNAME = "陪練 BOT";
 
 /** 房號：6 位、去掉易混淆字元（0/O/1/I/L）。worker 路由與 Lobby DO 共用。 */
 export const ROOM_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";

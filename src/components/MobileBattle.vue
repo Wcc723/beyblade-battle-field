@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import ArenaSvg from "./ArenaSvg.vue";
+import BbIcon from "./ui/BbIcon.vue";
 import { useBattle } from "../composables/useBattle";
 
 // 手機版只負責「手機專屬版面」，對戰邏輯全部來自 useBattle（與桌面版同源）。
@@ -59,7 +60,7 @@ const phaseClass = computed(() =>
         </div>
       </div>
 
-      <div v-if="slowmo && playing" class="m-slowmo">⏱ SLOW-MO</div>
+      <div v-if="slowmo && playing" class="m-slowmo"><BbIcon name="hourglass" :size="12" /> SLOW-MO</div>
       <div v-if="dragging" class="m-power">力道 {{ powerPct }}%</div>
       <div v-if="isFinished()" class="m-winner" :class="{ champion: matchOver }">
         <template v-if="matchOver">{{ championLabel() }}</template>
@@ -70,10 +71,10 @@ const phaseClass = computed(() =>
     <!-- 控制：瞄準設定 / 回放控制（依階段切換） -->
     <div class="m-panel" v-if="phase !== 'playing'">
       <div class="setup-head">
-        <strong :style="{ color: activeColor }">{{ phase === 'aim-A' ? '🔴 紅方 A 設定' : '🔵 藍方 B 設定' }}</strong>
+        <strong :style="{ color: activeColor }">{{ phase === 'aim-A' ? '紅方 A 設定' : '藍方 B 設定' }}</strong>
         <div class="chips">
-          <span class="chip" :class="{ on: launchA }" :style="{ color: setupA.color }">A {{ launchA ? '✓' : '…' }}</span>
-          <span class="chip" :class="{ on: launchB }" :style="{ color: setupB.color }">B {{ launchB ? '✓' : '…' }}</span>
+          <span class="chip" :class="{ on: launchA }" :style="{ color: setupA.color }">A <BbIcon v-if="launchA" name="check" :size="12" /><template v-else>…</template></span>
+          <span class="chip" :class="{ on: launchB }" :style="{ color: setupB.color }">B <BbIcon v-if="launchB" name="check" :size="12" /><template v-else>…</template></span>
         </div>
       </div>
 
@@ -85,22 +86,22 @@ const phaseClass = computed(() =>
         </label>
         <label>旋向
           <select v-model.number="active.spinDir">
-            <option :value="1">↺ 右旋</option>
-            <option :value="-1">↻ 左旋</option>
+            <option :value="1">右旋</option>
+            <option :value="-1">左旋</option>
           </select>
         </label>
         <label class="span2">必殺技
           <select v-model="active.special">
             <option value="">無</option>
-            <option value="rush">🗡️ 衝刺突進</option>
-            <option value="blast">💥 衝擊</option>
-            <option value="dash">⚡ 高速移動</option>
-            <option value="vortex">🌀 旋渦</option>
-            <option value="clone">👥 分身</option>
+            <option value="rush">衝刺突進</option>
+            <option value="blast">衝擊</option>
+            <option value="dash">高速移動</option>
+            <option value="vortex">旋渦</option>
+            <option value="clone">分身</option>
           </select>
         </label>
       </div>
-      <p v-if="active.special" class="m-spinfo">⚡ {{ specialInfo(active.special) }}</p>
+      <p v-if="active.special" class="m-spinfo"><BbIcon name="lightning" :size="12" /> {{ specialInfo(active.special) }}</p>
 
       <div class="mode-row">
         <span class="mode-lbl">發射</span>
@@ -111,7 +112,7 @@ const phaseClass = computed(() =>
     </div>
 
     <div class="m-replay" v-else-if="result">
-      <button class="ctrl" @click="togglePlay">{{ playing ? "⏸" : "▶" }}</button>
+      <button class="ctrl" @click="togglePlay"><BbIcon :name="playing ? 'pause' : 'play'" :size="16" /></button>
       <input class="scrub" type="range" min="0" :max="result.frames.length - 1" step="1" v-model.number="playhead" />
       <select v-model.number="speed" class="speed">
         <option :value="0.5">0.5x</option>
@@ -119,8 +120,8 @@ const phaseClass = computed(() =>
         <option :value="2">2x</option>
         <option :value="3">3x</option>
       </select>
-      <button v-if="matchOver" class="again" @click="resetMatch">🔄 重來</button>
-      <button v-else class="again" @click="nextRound">下一回合 →</button>
+      <button v-if="matchOver" class="again" @click="resetMatch"><BbIcon name="arrow-repeat" :size="14" /> 重來</button>
+      <button v-else class="again" @click="nextRound">下一回合 <BbIcon name="arrow-right" :size="14" /></button>
       <span class="time">{{ currentTime() }}s / {{ result.duration.toFixed(2) }}s</span>
     </div>
 
@@ -131,8 +132,8 @@ const phaseClass = computed(() =>
           <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
         </select>
       </label>
-      <button class="foot-reset" @click="sfxEnabled = !sfxEnabled">{{ sfxEnabled ? "🔊" : "🔇" }}</button>
-      <button class="foot-reset" @click="resetMatch">↺ 重新對戰</button>
+      <button class="foot-reset" @click="sfxEnabled = !sfxEnabled"><BbIcon :name="sfxEnabled ? 'volume-up' : 'volume-mute'" :size="16" /></button>
+      <button class="foot-reset" @click="resetMatch"><BbIcon name="arrow-repeat" :size="14" /> 重新對戰</button>
     </div>
   </div>
 </template>
@@ -188,7 +189,7 @@ const phaseClass = computed(() =>
 }
 .m-phase.is-play {
   background: var(--accent);
-  color: #1a1207;
+  color: var(--bg);
 }
 
 /* 場地 */
@@ -389,7 +390,7 @@ const phaseClass = computed(() =>
 }
 .mode-row button.active {
   background: var(--accent);
-  color: #1a1207;
+  color: var(--bg);
   border-color: var(--accent);
 }
 .m-hint {
@@ -436,7 +437,7 @@ const phaseClass = computed(() =>
 }
 .m-replay .again {
   background: var(--accent);
-  color: #1a1207;
+  color: var(--bg);
   border: none;
   border-radius: 10px;
   padding: 10px 14px;

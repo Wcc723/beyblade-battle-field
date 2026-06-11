@@ -3,6 +3,7 @@ import { computed } from "vue";
 import type { BeybladeStats, SpecialConfig } from "../physics/types";
 import { PRESET_LABELS } from "../physics/presets";
 import { localTuningApi, type TuningStoreApi } from "../store/adminBackend";
+import BbIcon from "./ui/BbIcon.vue";
 
 // 資料源注入：不傳 = localStorage（測試頁用那份）；/admin/* 會傳 D1 遠端版
 const props = withDefaults(defineProps<{ tuning?: TuningStoreApi; showGoBattle?: boolean }>(), {
@@ -75,10 +76,10 @@ const STAT_FIELDS: { key: keyof BeybladeStats; label: string; hint: string }[] =
 ];
 
 const TYPE_COLORS: Record<string, string> = {
-  attack: "#ff5d5d",
-  defense: "#5db4ff",
-  stamina: "#6ad08a",
-  balance: "#ffd166",
+  attack: "#e8442e",
+  defense: "#2e9fe8",
+  stamina: "#57d96b",
+  balance: "#ffb31f",
 };
 // computed：遠端模式下 stats 是非同步載入，keys 會晚到
 const typeKeys = computed(() => Object.keys(stats));
@@ -90,7 +91,7 @@ function onInput() {
 
 <template>
   <div v-if="error" class="store-error">
-    ⚠️ {{ error }}
+    {{ error }}
     <button v-if="tuning.reload" class="retry" @click="tuning.reload()">重試</button>
   </div>
   <div v-if="!ready && !error" class="store-loading">載入線上設定中…</div>
@@ -101,7 +102,7 @@ function onInput() {
         現行預設已校過平衡：攻擊剋持久、持久剋防禦、防禦剋攻擊。改動會打破此平衡，請搭配
         <code>npm run balance</code> 驗證。
       </p>
-      <button class="reset-all" @click="resetAllStats">↺ 全部還原預設</button>
+      <button class="reset-all" @click="resetAllStats"><BbIcon name="arrow-counterclockwise" :size="14" /> 全部還原預設</button>
     </div>
 
     <div class="grid">
@@ -125,14 +126,14 @@ function onInput() {
     </div>
 
     <div class="special-head">
-      <h3>⚡ 必殺技數值（每招分開設定）</h3>
+      <h3><BbIcon name="lightning" :size="16" /> 必殺技數值（每招分開設定）</h3>
       <button class="reset" @click="resetSpecial">還原預設</button>
     </div>
     <div class="special-grid">
       <div class="special-card">
-        <h4>🗡️ 衝刺突進</h4>
+        <h4>衝刺突進</h4>
         <p class="sp-hint">
-          <b>觸發</b>：逼近對手（進入觸發距離 {{ special.rushRange }}）時，以 {{ Math.round(special.rushChance * 100) }}% 機率發動 → 朝對手爆發加速衝撞 + 直接扣血。<br />
+          <b>觸發</b>：逼近對手（進入觸發距離 {{ special.rushRange }}）時，以 {{ Math.round(special.rushChance * 100) }}% 機率發動，朝對手爆發加速衝撞 + 直接扣血。<br />
           <b>限制</b>：發動後冷卻 <b>{{ special.rushCooldown }}s</b>、每回合最多 <b>{{ special.rushMaxUses }}</b> 次。
         </p>
         <div class="sp-grid">
@@ -143,9 +144,9 @@ function onInput() {
         </div>
       </div>
       <div class="special-card">
-        <h4>💥 衝擊</h4>
+        <h4>衝擊</h4>
         <p class="sp-hint">
-          <b>觸發</b>：自己打出的撞擊強度 &gt; {{ special.blastImpactMin }} 時，以 {{ Math.round(special.blastChance * 100) }}% 機率發動 → 把對手彈開 + 扣血（可順勢擊出界）。<br />
+          <b>觸發</b>：自己打出的撞擊強度 &gt; {{ special.blastImpactMin }} 時，以 {{ Math.round(special.blastChance * 100) }}% 機率發動，把對手彈開 + 扣血（可順勢擊出界）。<br />
           <b>限制</b>：發動後冷卻 <b>{{ special.blastCooldown }}s</b>、每回合最多 <b>{{ special.blastMaxUses }}</b> 次。
         </p>
         <div class="sp-grid">
@@ -157,9 +158,9 @@ function onInput() {
       </div>
 
       <div class="special-card">
-        <h4>⚡ 高速移動</h4>
+        <h4>高速移動</h4>
         <p class="sp-hint">
-          <b>觸發</b>：自旋（續航）低於 {{ Math.round(special.dashTriggerSpin * 100) }}% 時，以 {{ Math.round(special.dashChance * 100) }}% 機率發動 → 回補 {{ special.dashSpinRestore }} 自旋（續命）+ {{ special.dashDuration }}s 移動加速（夾速度上限，不會自爆出界）。<br />
+          <b>觸發</b>：自旋（續航）低於 {{ Math.round(special.dashTriggerSpin * 100) }}% 時，以 {{ Math.round(special.dashChance * 100) }}% 機率發動，回補 {{ special.dashSpinRestore }} 自旋（續命）+ {{ special.dashDuration }}s 移動加速（夾速度上限，不會自爆出界）。<br />
           <b>限制</b>：冷卻 <b>{{ special.dashCooldown }}s</b>、每回合最多 <b>{{ special.dashMaxUses }}</b> 次。
         </p>
         <div class="sp-grid">
@@ -171,9 +172,9 @@ function onInput() {
       </div>
 
       <div class="special-card">
-        <h4>🌀 旋渦</h4>
+        <h4>旋渦</h4>
         <p class="sp-hint">
-          <b>觸發</b>：對手進入 {{ special.vortexRange }} 距離時，以 {{ Math.round(special.vortexChance * 100) }}% 機率發動 → {{ special.vortexDuration }}s 內把對手往自己拉 + 每秒抽乾對手 {{ special.vortexSpinDrain }} 自旋（拉進來磨，重型/防禦最爽）。<br />
+          <b>觸發</b>：對手進入 {{ special.vortexRange }} 距離時，以 {{ Math.round(special.vortexChance * 100) }}% 機率發動，{{ special.vortexDuration }}s 內把對手往自己拉 + 每秒抽乾對手 {{ special.vortexSpinDrain }} 自旋（拉進來磨，重型/防禦最爽）。<br />
           <b>限制</b>：冷卻 <b>{{ special.vortexCooldown }}s</b>、每回合最多 <b>{{ special.vortexMaxUses }}</b> 次。
         </p>
         <div class="sp-grid">
@@ -185,7 +186,7 @@ function onInput() {
       </div>
 
       <div class="special-card">
-        <h4>👥 分身</h4>
+        <h4>分身</h4>
         <p class="sp-hint">
           <b>觸發</b>：對手進入 {{ special.cloneRange }} 距離時，以 {{ Math.round(special.cloneChance * 100) }}% 機率召喚一個分身（傷害 ×{{ special.cloneAttackMul }}、{{ special.cloneDuration }}s 後消失、不計勝負）。<br />
           <b>限制</b>：冷卻 <b>{{ special.cloneCooldown }}s</b>、每回合最多 <b>{{ special.cloneMaxUses }}</b> 次。
@@ -199,8 +200,8 @@ function onInput() {
       </div>
     </div>
 
-    <button v-if="props.showGoBattle" class="go" @click="$emit('go-battle')">→ 回對戰場試打</button>
-    <p v-else class="online-note">測試頁（🧪 / 📱）吃的是「本機測試」那份數值，這裡改的是線上對戰用的全域數值。</p>
+    <button v-if="props.showGoBattle" class="go" @click="$emit('go-battle')">回對戰場試打 <BbIcon name="arrow-right" :size="14" /></button>
+    <p v-else class="online-note">測試頁吃的是「本機測試」那份數值，這裡改的是線上對戰用的全域數值。</p>
   </div>
 </template>
 

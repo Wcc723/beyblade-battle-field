@@ -3,6 +3,7 @@ import { reactive, ref } from "vue";
 import type { ArenaConfig } from "../physics/types";
 import { DEFAULT_ARENA } from "../physics/engine";
 import { localArenaApi, type ArenaStoreApi } from "../store/adminBackend";
+import BbIcon from "./ui/BbIcon.vue";
 
 // 資料源注入：不傳 = localStorage（測試頁用那份）；/admin/* 會傳 D1 遠端版
 const props = withDefaults(defineProps<{ store?: ArenaStoreApi; showGoBattle?: boolean }>(), {
@@ -124,7 +125,7 @@ async function factoryReset(id: string) {
 
 <template>
   <div v-if="error" class="store-error">
-    ⚠️ {{ error }}
+    {{ error }}
     <button v-if="store.reload" class="retry" @click="store.reload()">重試</button>
   </div>
   <div v-if="!ready && !error" class="store-loading">載入線上設定中…</div>
@@ -191,15 +192,15 @@ async function factoryReset(id: string) {
             <input type="range" min="0" max="200" step="10" v-model.number="swDraft.accelInward" />
           </label>
           <p class="hint">
-            擊飛越牆需要「碰撞彈跳↑ + 重力↓」——開啟時已自動套建議值（碰撞彈跳 0.7、重力 350），可用上方滑桿微調。出界很罕見（~3%）是設計如此。
+            擊飛越牆需要「碰撞彈跳調高 + 重力調低」——開啟時已自動套建議值（碰撞彈跳 0.7、重力 350），可用上方滑桿微調。出界很罕見（~3%）是設計如此。
           </p>
         </div>
       </div>
 
       <div class="actions">
         <button class="primary" @click="saveAsNew">＋ 另存為新場地</button>
-        <button v-if="editingId" @click="updateCurrent">💾 更新此場地</button>
-        <button class="ghost" @click="resetDraft">↺ 重設為預設值</button>
+        <button v-if="editingId" @click="updateCurrent"><BbIcon name="floppy" :size="14" /> 更新此場地</button>
+        <button class="ghost" @click="resetDraft"><BbIcon name="arrow-counterclockwise" :size="14" /> 重設為預設值</button>
       </div>
     </section>
 
@@ -218,7 +219,7 @@ async function factoryReset(id: string) {
           <div class="ops">
             <button @click="store.setActive(p.id)" :disabled="p.id === activeId">套用</button>
             <button @click="loadToEditor(p.id)">編輯</button>
-            <button v-if="p.builtin && p.userEdited" @click="factoryReset(p.id)" title="還原成程式碼原廠值">↺ 原廠</button>
+            <button v-if="p.builtin && p.userEdited" @click="factoryReset(p.id)" title="還原成程式碼原廠值"><BbIcon name="arrow-counterclockwise" :size="12" /> 原廠</button>
             <button
               class="danger"
               :disabled="presets.length <= 1"
@@ -228,8 +229,8 @@ async function factoryReset(id: string) {
           </div>
         </li>
       </ul>
-      <button v-if="props.showGoBattle" class="go" @click="$emit('go-battle')">→ 回對戰場試打</button>
-      <p v-else class="online-note">測試頁（🧪 / 📱）吃的是「本機測試」那份設定，這裡改的是線上對戰用的全域設定。</p>
+      <button v-if="props.showGoBattle" class="go" @click="$emit('go-battle')">回對戰場試打 <BbIcon name="arrow-right" :size="14" /></button>
+      <p v-else class="online-note">測試頁吃的是「本機測試」那份設定，這裡改的是線上對戰用的全域設定。</p>
     </section>
   </div>
 </template>
@@ -385,7 +386,7 @@ async function factoryReset(id: string) {
 }
 .actions .primary {
   background: var(--accent);
-  color: #1a1207;
+  color: var(--bg);
   border-color: var(--accent);
 }
 .actions .ghost {

@@ -17,10 +17,10 @@ function storeFor(m: "online" | "local"): ArenaStoreApi {
 
 <template>
   <div class="mode-bar">
-    <button :class="{ active: mode === 'online' }" @click="mode = 'online'">🌐 線上設定（D1）</button>
-    <button :class="{ active: mode === 'local' }" @click="mode = 'local'">💻 本機測試（localStorage）</button>
+    <button :class="{ active: mode === 'online' }" @click="mode = 'online'">線上設定（D1）</button>
+    <button :class="{ active: mode === 'local' }" @click="mode = 'local'">本機測試（localStorage）</button>
     <span class="mode-hint">
-      {{ mode === "online" ? "正式線上對戰用的全域場地（所有玩家共用）" : "測試頁（🧪 / 📱）用的本機場地" }}
+      {{ mode === "online" ? "正式線上對戰用的全域場地（所有玩家共用）" : "測試頁用的本機場地" }}
     </span>
   </div>
   <!-- :key 讓切換資料源時重掛元件 → 編輯器草稿不會殘留另一邊的內容。
