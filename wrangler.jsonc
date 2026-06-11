@@ -25,9 +25,8 @@
     {
       "binding": "DB",
       "database_name": "beyblade-battle-field",
-      // 本地開發用不到真 id（存 .wrangler/state 的本地 SQLite）；
-      // 部署前：wrangler d1 create beyblade-battle-field → 把真 id 填進來
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // 正式 D1（本地開發仍走 .wrangler/state 的本地 SQLite，不會碰到它）
+      "database_id": "687dd034-f206-40c0-9aa8-6cb9aad7c622",
       "migrations_dir": "migrations"
     }
   ],
