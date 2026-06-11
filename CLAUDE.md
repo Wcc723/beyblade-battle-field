@@ -13,7 +13,8 @@ npm run test:watch # vitest watch
 npm run balance    # 平衡分析：四類型互打數千場，輸出勝率/勝負原因/猜拳矩陣
 npm run build      # Vite build（注意：build 不做型別檢查）
 npm run typecheck  # 型別檢查：vue-tsc（前端）+ tsc -p tsconfig.worker.json（worker，改完務必跑）
-npm run deploy     # build + wrangler deploy
+npm run deploy     # build + wrangler deploy（本機手動部署用）
+npm run deploy:ci  # 正式環境 D1 migrations + deploy（Cloudflare Git 部署的「部署命令」用它；新 migration 推上去即自動套用）
 npm run cf-typegen # wrangler types → 重新產生 worker-configuration.d.ts（改 wrangler.jsonc 後要跑）
 ```
 
