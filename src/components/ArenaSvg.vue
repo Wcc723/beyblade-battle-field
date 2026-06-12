@@ -7,7 +7,7 @@
  */
 import { computed } from "vue";
 import type { ArenaConfig } from "../physics/types";
-import { effectiveRim, rimAt, sampleSoftWall, sampleBoundary, boundaryRadiusAt } from "../physics/arena";
+import { effectiveRim, rimAt, sampleSoftWall, sampleBoundary } from "../physics/arena";
 
 const props = defineProps<{ arena: ArenaConfig }>();
 
@@ -61,9 +61,6 @@ function arcPath(r: number, a0: number, a1: number, large = 0, sweep = 1): strin
 }
 
 /* ---------- 超橢圓場（弧壁）幾何 ---------- */
-function svgPt(wx: number, wy: number): string {
-  return `${(C + wx * scale.value).toFixed(1)},${(C - wy * scale.value).toFixed(1)}`;
-}
 /** 以畫布中心為原點的等比縮放 transform（內圈拉絲紋用） */
 function ringTf(k: number): string {
   const t = C * (1 - k);
@@ -74,28 +71,27 @@ const superG = computed(() => {
   // 邊界路徑：吃「引擎用的同一份」r(θ)（sampleBoundary）→ 畫面與物理同源
   const pts = sampleBoundary(props.arena, 288);
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${toSvgWorld(p.x, p.y)}`).join(" ") + " Z";
-  // 出界扇區（rim，弧壁場為四個對角 pocket）：沿邊界「外側」取樣的帶狀 hazard 區 + 計分標籤。
-  // 帶畫在邊界外（boundary → boundary+bandW）＝「飛越這道牆才出局」——場內任何位置都不會
-  // 觸發出界（物理同此語意，見 resolveSuperellipseWall），別再畫內側帶誤導玩家「碰到就出局」。
-  const bandW = 25; // hazard 帶寬（world 單位）；外擴後仍在畫布內（對角最遠 = radius，PAD=28 有餘裕）
+  // 出界角區（rim，弧壁場為四個對角 pocket）：與熔核競技場（boxG）**同款**——
+  // 機殼最外層四角各一塊直角三角形 hazard + 角落 2× 標籤（使用者拍板：出界標示在
+  // 「外殼的外牆」、視覺與方形場一致）。內牆與機殼間的空隙保持乾淨深色，
+  // followThrough 擊飛軌跡穿過空隙、落進外角三角形 → 讀出「摔出最外層才出局」。
+  // 出界判定物理仍在越過 r(θ) 邊界（resolveSuperellipseWall），視覺不影響判定。
+  const SHELL_IN = 30; // 機殼內緣 inset（px）：避開內框厚邊（內緣 ~21px）與四角鉚釘（外緣 ~27px）
+  const H = C - SHELL_IN; // 機殼內緣方形半邊長（px）；三角形最遠到 C+H=610 < 640 不溢出
+  const GP = 72; // 角落三角形腿長（px）：對齊 boxG 角落的視覺比例
   const exits = effectiveRim(props.arena)
     .map((seg) => {
       const rp = rimAt(props.arena, seg.angle);
-      const N = 14;
-      const outer: string[] = [];
-      const inner: string[] = [];
-      for (let i = 0; i <= N; i++) {
-        const a = seg.angle - seg.half + (i / N) * seg.half * 2;
-        const r = boundaryRadiusAt(props.arena, a);
-        outer.push(svgPt((r + bandW) * Math.cos(a), (r + bandW) * Math.sin(a)));
-        inner.unshift(svgPt(r * Math.cos(a), r * Math.sin(a)));
-      }
-      // 計分標籤放外側帶中線
-      const rl = boundaryRadiusAt(props.arena, seg.angle) + bandW / 2;
+      // 扇區中線方向 → 對應的機殼角落（±45°/±135° 取 cos/sin 正負號）
+      const sx = Math.cos(seg.angle) >= 0 ? 1 : -1;
+      const sy = -Math.sin(seg.angle) >= 0 ? 1 : -1; // 畫布 y 翻轉
+      const cx = C + sx * H;
+      const cy = C + sy * H;
+      // 直角三角形：角點 + 兩腿沿機殼邊緣各退 GP（同 boxG corners 的構成）
       return {
-        pts: [...outer, ...inner].join(" "),
-        lx: C + rl * Math.cos(seg.angle) * scale.value,
-        ly: C - rl * Math.sin(seg.angle) * scale.value,
+        pts: `${cx - sx * GP},${cy} ${cx},${cy} ${cx},${cy - sy * GP}`,
+        lx: cx - sx * GP * 0.42,
+        ly: cy - sy * GP * 0.42,
         kind: rp.kind,
         score: rp.score,
       };
@@ -253,7 +249,7 @@ const boxG = computed(() => {
       >2×</text><!-- 計分新制：出界一律 2 分（cornerScore 不再參與計分） -->
     </g>
 
-    <!-- 超橢圓場（弧壁）：四邊外凸弧形牆 + 對角出界扇區 -->
+    <!-- 超橢圓場（弧壁）：四邊外凸弧形牆 + 最外層四角出界區 -->
     <g v-else-if="superG">
       <path :d="superG.path" fill="url(#as-bowl)" filter="url(#as-bowlshadow)" />
       <path :d="superG.path" fill="url(#as-shade)" />
@@ -261,12 +257,24 @@ const boxG = computed(() => {
       <path :d="superG.path" fill="none" :transform="ringTf(0.82)" stroke="rgba(170,180,196,0.1)" stroke-width="1.5" />
       <path :d="superG.path" fill="none" :transform="ringTf(0.6)" stroke="rgba(170,180,196,0.08)" stroke-width="1.5" />
       <path :d="superG.path" fill="none" :transform="ringTf(0.36)" stroke="rgba(170,180,196,0.07)" stroke-width="1.5" />
-      <!-- 碗外緣：鋼色描邊 -->
+
+      <!-- 最外層四角出界區：邊界與機殼內緣間的角落空隙整塊黃黑斜紋 + 細紅描邊（先畫，讓邊界鋼線壓在上面） -->
+      <polygon
+        v-for="(e, i) in superG.exits"
+        :key="'sez' + i"
+        :points="e.pts"
+        fill="url(#as-hazard)"
+        fill-opacity="0.85"
+        stroke="#e8442e"
+        stroke-width="2"
+        stroke-linejoin="round"
+      />
+
+      <!-- 碗外緣：鋼色描邊（壓在 hazard 內緣上 → 邊界線保持清晰） -->
       <path :d="superG.path" fill="none" stroke="#7e8a9c" stroke-width="3" />
 
-      <!-- 對角出界扇區：黃黑警示斜紋帶 + 細紅描邊 + 計分標籤 -->
-      <g v-for="(e, i) in superG.exits" :key="'se' + i">
-        <polygon :points="e.pts" fill="url(#as-hazard)" fill-opacity="0.85" stroke="#e8442e" stroke-width="2" stroke-linejoin="round" />
+      <!-- 角落計分標籤（角落深處） -->
+      <g v-for="(e, i) in superG.exits" :key="'sel' + i">
         <text
           v-if="e.score > 1"
           :x="e.lx"

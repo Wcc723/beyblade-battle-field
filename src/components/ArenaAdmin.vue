@@ -60,16 +60,20 @@ const draft = reactive<ArenaConfig>({ ...DEFAULT_ARENA });
 const name = ref("我的場地");
 const editingId = ref<string>(""); // 非空 = 正在編輯既有預設
 
-// 方形場(box) / 綠色實體內牆(softWall) 當「可選模組」：各自獨立開關 + 參數，套到任何場地。
+// 外觀（邊界形狀）三選一：圓形（預設）/ 方形 box / 弧壁 superellipse——互斥，切換時設定對應欄位。
+// 綠色實體內牆(softWall) 維持「可選模組」：獨立開關 + 參數，可套到任何外觀。
+type ArenaShape = "circle" | "box" | "superellipse";
 const BOX_DEFAULT = { half: 230, cornerGap: 60, wallBounce: 0.6, cornerScore: 2 };
+const SE_DEFAULT = { power: 3.5 }; // 弧壁：r(θ) 超橢圓指數（3~4 = 方中帶弧、對角最遠）
 const SW_DEFAULT = {
   radius: 208, bandHalf: 7, topAngle: Math.PI / 2,
   wallHeight: 10, wallBounce: 0.6, spinLoss: 0.12,
   accelBoost: 150, accelInward: 110, accelMinSpin: 0.12,
 };
-const useBox = ref(false);
+const shape = ref<ArenaShape>("circle");
 const useSoftWall = ref(false);
 const boxDraft = reactive({ ...BOX_DEFAULT });
+const seDraft = reactive({ ...SE_DEFAULT });
 const swDraft = reactive({ ...SW_DEFAULT });
 
 // 使用者「手動勾選」綠色內牆時，自動套用「擊飛越牆」需要的 jump 物理（碰撞彈跳↑、重力↓）。
@@ -81,10 +85,11 @@ function onSoftWallToggle() {
   }
 }
 
-/** 組出最終 config：純量 draft + 視開關掛上 box / softWall。 */
+/** 組出最終 config：純量 draft + 依外觀掛上 box / superellipse（互斥）+ 視開關掛上 softWall。 */
 function buildConfig(): ArenaConfig {
   const cfg: ArenaConfig = { ...draft };
-  cfg.box = useBox.value ? { ...boxDraft } : undefined;
+  cfg.box = shape.value === "box" ? { ...boxDraft } : undefined;
+  cfg.superellipse = shape.value === "superellipse" ? { ...seDraft } : undefined;
   cfg.softWall = useSoftWall.value ? { ...swDraft } : undefined;
   return cfg;
 }
@@ -93,10 +98,13 @@ function loadToEditor(id: string) {
   const p = presets.value.find((x) => x.id === id);
   if (!p) return;
   Object.assign(draft, p.config);
-  draft.box = undefined; // box/softWall 交給獨立模組管
+  draft.box = undefined; // box/superellipse/softWall 交給外觀選擇器與獨立模組管
+  draft.superellipse = undefined;
   draft.softWall = undefined;
-  useBox.value = !!p.config.box;
-  if (p.config.box) Object.assign(boxDraft, p.config.box);
+  // 外觀回讀：box 優先（引擎同序）→ superellipse → 圓形；先鋪預設再蓋存檔值（舊存檔缺欄不殘留前一場地的值）
+  shape.value = p.config.box ? "box" : p.config.superellipse ? "superellipse" : "circle";
+  Object.assign(boxDraft, BOX_DEFAULT, p.config.box ?? {});
+  Object.assign(seDraft, SE_DEFAULT, p.config.superellipse ?? {});
   useSoftWall.value = !!p.config.softWall;
   if (p.config.softWall) Object.assign(swDraft, p.config.softWall);
   name.value = p.name;
@@ -116,10 +124,12 @@ async function updateCurrent() {
 function resetDraft() {
   Object.assign(draft, DEFAULT_ARENA);
   draft.box = undefined;
+  draft.superellipse = undefined;
   draft.softWall = undefined;
-  useBox.value = false;
+  shape.value = "circle";
   useSoftWall.value = false;
   Object.assign(boxDraft, BOX_DEFAULT);
+  Object.assign(seDraft, SE_DEFAULT);
   Object.assign(swDraft, SW_DEFAULT);
   name.value = "我的場地";
   editingId.value = "";
@@ -165,14 +175,18 @@ async function factoryReset(id: string) {
         </label>
       </div>
 
-      <!-- 可選模組：方形場 / 綠色實體內牆（各自獨立開關，可套到任何場地） -->
+      <!-- 外觀（邊界形狀）三選一 + 可選模組：綠色實體內牆 -->
       <div class="modules">
-        <label class="toggle">
-          <input type="checkbox" v-model="useBox" />
-          <span>方形場（四角出界 + 四邊反彈）</span>
-          <i>不開＝圓形場（沿用上方半徑 + 邊緣分區出界）</i>
+        <label class="shape-field">
+          <span class="shape-label">外觀（邊界形狀）</span>
+          <select v-model="shape" class="shape-select">
+            <option value="circle">圓形（半徑 + 邊緣分區出界）</option>
+            <option value="box">方形（四角出界 + 四邊反彈）</option>
+            <option value="superellipse">弧壁（超橢圓・方中帶弧・對角最遠）</option>
+          </select>
         </label>
-        <div v-if="useBox" class="sub-grid">
+        <p class="shape-hint">外觀決定邊界形狀：方形走四角開口出界、弧壁用超橢圓 r(θ)（對角出界扇區可由內建弧壁場參考 rim 設定）、圓形沿用上方半徑。</p>
+        <div v-if="shape === 'box'" class="sub-grid">
           <label class="field">
             <span>場地邊長 <b>{{ boxDraft.half.toFixed(0) }}</b></span>
             <input type="range" min="150" max="320" step="10" v-model.number="boxDraft.half" />
@@ -180,6 +194,12 @@ async function factoryReset(id: string) {
           <label class="field">
             <span>角落開口（越大越易出界）<b>{{ boxDraft.cornerGap.toFixed(0) }}</b></span>
             <input type="range" min="20" max="120" step="5" v-model.number="boxDraft.cornerGap" />
+          </label>
+        </div>
+        <div v-if="shape === 'superellipse'" class="sub-grid">
+          <label class="field">
+            <span>弧壁指數 power（越大越接近方形）<b>{{ seDraft.power.toFixed(1) }}</b></span>
+            <input type="range" min="2" max="6" step="0.1" v-model.number="seDraft.power" />
           </label>
         </div>
 
@@ -359,6 +379,32 @@ async function factoryReset(id: string) {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.shape-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--text);
+  flex-wrap: wrap;
+}
+.shape-label {
+  font-weight: 600;
+}
+.shape-select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.shape-hint {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
 }
 .toggle {
   display: flex;

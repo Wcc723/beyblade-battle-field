@@ -11,8 +11,20 @@ import { DEFAULT_SPECIAL } from "../physics/engine";
 import { STAT_PRESETS } from "../physics/presets";
 import type { ArenaConfigBlob, ArenaPreset } from "./arenaStore";
 import * as localArena from "./arenaStore";
-import { stats as localStats, persistStats, resetStat, resetAllStats } from "./statStore";
+import {
+  stats as localStats,
+  persistStats,
+  resetStat,
+  resetAllStats,
+  beys as localBeys,
+  persistBeys,
+  resetBey,
+  defaultBeyTuning,
+  mergeBeyTuning,
+  type BeyTuning,
+} from "./statStore";
 import { special as localSpecial, persistSpecial, resetSpecial } from "./specialStore";
+import { BEYBLADES, getBey } from "../game/beyblades";
 
 export interface ArenaStoreApi {
   presets: Ref<ArenaPreset[]>;
@@ -38,13 +50,18 @@ export interface ArenaStoreApi {
 export interface TuningStoreApi {
   stats: Record<string, BeybladeStats>;
   special: SpecialConfig;
+  /** 陀螺個體調整：beyId → 鋪滿全欄的 mods/crit/specialPower（永遠涵蓋整本名冊，UI 直接 v-model） */
+  beys: Record<string, BeyTuning>;
   ready: Ref<boolean>;
   error: Ref<string>;
   persistStats(): void;
   persistSpecial(): void;
+  persistBeys(): void;
   resetStat(key: string): void;
   resetAllStats(): void;
   resetSpecial(): void;
+  /** 單顆個體調整還原名冊預設值 */
+  resetBey(beyId: string): void;
   /** 遠端版才有 */
   reload?: () => Promise<void>;
   /** 遠端版才有：立刻送出尚未送出的 debounce 寫入（view 卸載時呼叫，避免掉資料） */
@@ -80,13 +97,16 @@ export const localArenaApi: ArenaStoreApi = {
 export const localTuningApi: TuningStoreApi = {
   stats: localStats,
   special: localSpecial,
+  beys: localBeys,
   ready: ref(true),
   error: ref(""),
   persistStats,
   persistSpecial,
+  persistBeys,
   resetStat,
   resetAllStats,
   resetSpecial,
+  resetBey,
 };
 
 /* ---------- remote（D1 全域設定） ---------- */
@@ -117,7 +137,7 @@ function debounced(fn: () => void, ms: number): { call(): void; flush(): void; c
 }
 
 /** 回傳是否成功（失敗只設 error，由呼叫端決定要不要重新同步）。keepalive：pagehide flush 時也送得出去。 */
-async function putAdminConfig(key: "arena" | "stats" | "special", value: unknown, error: Ref<string>): Promise<boolean> {
+async function putAdminConfig(key: "arena" | "stats" | "special" | "beys", value: unknown, error: Ref<string>): Promise<boolean> {
   try {
     const res = await fetch(`/api/admin/config/${key}`, {
       method: "PUT",
@@ -245,20 +265,28 @@ export function createRemoteArenaApi(): ArenaStoreApi {
 export function createRemoteTuningApi(): TuningStoreApi {
   const stats = reactive<Record<string, BeybladeStats>>({});
   const special = reactive<SpecialConfig>({ ...DEFAULT_SPECIAL });
+  const beys = reactive<Record<string, BeyTuning>>({});
   const ready = ref(false);
   const error = ref("");
 
   const pushStats = debounced(() => void putAdminConfig("stats", stats, error), 600);
   const pushSpecial = debounced(() => void putAdminConfig("special", special, error), 600);
+  const pushBeys = debounced(() => void putAdminConfig("beys", beys, error), 600);
 
   async function load(): Promise<void> {
     try {
       const res = await fetch("/api/config");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { stats: Record<string, BeybladeStats>; special: SpecialConfig };
+      const data = (await res.json()) as {
+        stats: Record<string, BeybladeStats>;
+        special: SpecialConfig;
+        beys?: Record<string, Partial<BeyTuning>>;
+      };
       // 鋪 STAT_PRESETS 底再蓋 D1 值：D1 blob 缺欄位（日後加新欄位/新類型）不會讓 UI render 炸掉
       for (const [k, v] of Object.entries(data.stats)) stats[k] = { ...(STAT_PRESETS[k] ?? {}), ...v };
       Object.assign(special, data.special);
+      // 個體調整：以「整本名冊」為準鋪名冊預設底，再蓋 D1 覆寫（D1 缺顆/缺欄都不會炸 UI）
+      for (const b of BEYBLADES) beys[b.id] = mergeBeyTuning(b, data.beys?.[b.id]);
       ready.value = true;
       error.value = "";
     } catch (e) {
@@ -270,6 +298,7 @@ export function createRemoteTuningApi(): TuningStoreApi {
   function flush(): void {
     pushStats.flush();
     pushSpecial.flush();
+    pushBeys.flush();
   }
   // 整頁卸載（F5/關分頁/外連）也要把未送出的寫入射出去（fetch keepalive 撐住）
   const onPageHide = () => flush();
@@ -278,10 +307,12 @@ export function createRemoteTuningApi(): TuningStoreApi {
   return {
     stats,
     special,
+    beys,
     ready,
     error,
     persistStats: () => pushStats.call(),
     persistSpecial: () => pushSpecial.call(),
+    persistBeys: () => pushBeys.call(),
     resetStat(key) {
       if (STAT_PRESETS[key]) {
         stats[key] = { ...STAT_PRESETS[key] };
@@ -295,6 +326,12 @@ export function createRemoteTuningApi(): TuningStoreApi {
     resetSpecial() {
       Object.assign(special, DEFAULT_SPECIAL);
       pushSpecial.call();
+    },
+    resetBey(beyId) {
+      const bey = getBey(beyId);
+      if (!bey) return;
+      beys[beyId] = defaultBeyTuning(bey);
+      pushBeys.call();
     },
     reload: load,
     flush,

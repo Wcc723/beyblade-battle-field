@@ -12,13 +12,13 @@ import type { BeybladeStats } from "./types";
  */
 export const STAT_PRESETS: Record<string, BeybladeStats> = {
   // 攻擊型：高攻擊、皮薄、續航短（短跑手）：開場爆發擊破/撞出界，拖久必輸（剋持久；被防禦熬死）
-  attack: { attack: 1.7, defense: 0.8, stamina: 0.82, weight: 1.0 },
+  attack: { attack: 1.78, defense: 0.8, stamina: 0.84, weight: 1.0 },
   // 防禦型：重、超耐打、抗出界，攻擊低（剋攻擊：扛住爆發後磨死短續航的攻擊型）
-  defense: { attack: 0.575, defense: 1.7, stamina: 0.98, weight: 1.4 },
+  defense: { attack: 0.62, defense: 1.7, stamina: 0.94, weight: 1.4 },
   // 持久型：續航最長 + 高防低攻（剋防禦：防禦型在它停轉前先轉完；攻擊壓低＝靠熬不靠殺）
-  stamina: { attack: 0.55, defense: 1.8, stamina: 1.25, weight: 1.06 },
+  stamina: { attack: 0.58, defense: 1.8, stamina: 1.25, weight: 1.06 },
   // 平衡型：偏重偏防的萬金油（對攻擊五五開、小輸防禦、小贏持久）
-  balance: { attack: 0.65, defense: 1.5, stamina: 1.05, weight: 1.26 },
+  balance: { attack: 0.66, defense: 1.5, stamina: 1.05, weight: 1.26 },
 };
 
 export const PRESET_LABELS: Record<string, string> = {

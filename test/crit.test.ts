@@ -1,9 +1,9 @@
 /**
  * 會心一擊 (crit) 與必殺強度 (specialPower) 的驗證：
  *  - 會心：每次碰撞、每側獨立擲骰（機率 = 攻擊者 stats.crit，預設 0.05），中了再 50/50 決定效果——
- *    "dmg"＝受擊側該次傷害 ×2（在 ±10% 浮動與 AGGRESSOR split 之後乘）；"kb"＝受擊側擊退 ×2（能量夾制後補推）。
+ *    "dmg"＝受擊側該次傷害 ×1.5（CRIT_DMG_MUL，在 ±10% 浮動與 AGGRESSOR split 之後乘）；"kb"＝受擊側擊退 ×2（能量夾制後補推）。
  *  - rng 消耗固定（每碰撞 4 次、沒中也消耗）→ crit 參數不同不位移 rng 流，
- *    同 seed 的 crit=0 對照組傷害基值逐位元相同 → 可精準驗「恰為 2x」。
+ *    同 seed 的 crit=0 對照組傷害基值逐位元相同 → 可精準驗「恰為 1.5x」。
  *  - specialPower s：必殺冷卻 ×(2−s)、rush/blast/clone 傷害 ×s；dash 回血/回轉、vortex 吸轉不吃 s。
  */
 import { describe, it, expect } from "vitest";
@@ -80,7 +80,7 @@ describe("會心一擊 (crit)", () => {
     expect(JSON.stringify(r1.frames)).toBe(JSON.stringify(r2.frames));
   });
 
-  it("crit=1.0 極端值：全部會心；dmg 型恰為 crit=0 對照組的 2x、kb 型傷害不變", () => {
+  it("crit=1.0 極端值：全部會心；dmg 型恰為 crit=0 對照組的 1.5x、kb 型傷害不變", () => {
     let sawDmg = 0;
     let sawKb = 0;
     for (let seed = 1; seed <= 40; seed++) {
@@ -98,14 +98,14 @@ describe("會心一擊 (crit)", () => {
       expect(c).toBeDefined();
       expect(e.impact).toBe(c.impact); // 碰撞前軌跡相同 → impact 逐位元一致
       if (e.critA === "dmg") {
-        expect(e.dmgA).toBe(c.dmgA! * 2); // 浮動之後 ×2 → 恰為對照組 2 倍（浮動值同 seed 同位置）
+        expect(e.dmgA).toBe(c.dmgA! * 1.5); // 浮動之後 ×1.5 → 恰為對照組 1.5 倍（浮動值同 seed 同位置）
         sawDmg++;
       } else {
         expect(e.dmgA).toBe(c.dmgA); // kb 型不動傷害
         sawKb++;
       }
       if (e.critB === "dmg") {
-        expect(e.dmgB).toBe(c.dmgB! * 2);
+        expect(e.dmgB).toBe(c.dmgB! * 1.5);
         sawDmg++;
       } else {
         expect(e.dmgB).toBe(c.dmgB);

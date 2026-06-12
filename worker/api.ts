@@ -3,7 +3,7 @@
  *
  * 全域設定（global_config，key-value JSON blob）：
  * - GET /api/config                → 登入即可讀（線上對戰用的場地/屬性/必殺技）
- * - PUT /api/admin/config/:key     → 管理員寫（key ∈ arena | stats | special）
+ * - PUT /api/admin/config/:key     → 管理員寫（key ∈ arena | stats | special | beys）
  *
  * 個人設定（user_settings）：
  * - GET /api/settings              → 自己的設定（無資料時回預設值，暱稱取 Google 名）
@@ -17,10 +17,56 @@ import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../src/physics/t
 import { DEFAULT_ARENA, XTREME_STADIUM, ARC_WALL_STADIUM, DEFAULT_SPECIAL } from "../src/physics/engine";
 import { STAT_PRESETS } from "../src/physics/presets";
 import { autoNickname } from "../src/game/names";
-import { getBey, DEFAULT_LINEUP } from "../src/game/beyblades";
+import { getBey, DEFAULT_LINEUP, type BeyDef } from "../src/game/beyblades";
 
-export const CONFIG_KEYS = ["arena", "stats", "special"] as const;
+export const CONFIG_KEYS = ["arena", "stats", "special", "beys"] as const;
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
+
+/* ---------- 陀螺個體覆寫（global_config key "beys"） ---------- */
+
+/** 單顆陀螺的後台覆寫（全欄可選：缺欄＝沿用名冊預設） */
+export interface BeyOverrideValue {
+  mods?: { attack?: number; defense?: number; stamina?: number; weight?: number };
+  crit?: number;
+  specialPower?: number;
+}
+
+/** global_config "beys" 的整包形狀：beyId → 覆寫值 */
+export type BeysValue = Record<string, BeyOverrideValue>;
+
+function clampNum(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/** 有限數字才採用（D1 blob 手改成字串/NaN 時靜默忽略該欄） */
+function finiteOrUndef(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * 把後台「個體調整」覆寫套到名冊預設上（淺合併 + 夾制）：
+ * mods 0.8~1.2、crit 0~0.25、specialPower 0.8~1.4。
+ * 無覆寫（或該顆無條目）→ 原樣回傳名冊定義。DO 組裝 stats 前呼叫（防 D1 壞值打爆平衡）。
+ */
+export function applyBeyOverrides(bey: BeyDef, overrides?: BeysValue): BeyDef {
+  const ov = overrides?.[bey.id];
+  if (!ov || typeof ov !== "object") return bey;
+  const mods = { ...bey.mods };
+  if (ov.mods && typeof ov.mods === "object") {
+    for (const k of ["attack", "defense", "stamina", "weight"] as const) {
+      const v = finiteOrUndef(ov.mods[k]);
+      if (v !== undefined) mods[k] = clampNum(v, 0.8, 1.2);
+    }
+  }
+  const crit = finiteOrUndef(ov.crit);
+  const sp = finiteOrUndef(ov.specialPower);
+  return {
+    ...bey,
+    mods,
+    crit: crit !== undefined ? clampNum(crit, 0, 0.25) : bey.crit,
+    specialPower: sp !== undefined ? clampNum(sp, 0.8, 1.4) : bey.specialPower,
+  };
+}
 
 /** 程式碼預設值（D1 空白時的 fallback；id 固定讓前後端對得上） */
 function defaultConfigValue(key: ConfigKey): unknown {
@@ -41,6 +87,8 @@ function defaultConfigValue(key: ConfigKey): unknown {
       return Object.fromEntries(Object.entries(STAT_PRESETS).map(([k, v]) => [k, { ...v }]));
     case "special":
       return { ...DEFAULT_SPECIAL };
+    case "beys":
+      return {}; // 空＝全部沿用名冊預設（單一真相在 src/game/beyblades.ts）
   }
 }
 
@@ -65,10 +113,12 @@ export interface GameConfig {
   arenas: { id: string; name: string; config: ArenaConfig }[];
   stats: Record<string, BeybladeStats>;
   special: SpecialConfig;
+  /** 陀螺個體覆寫（beyId → mods/crit/specialPower；DO 組裝 stats 時經 applyBeyOverrides 套用） */
+  beys: BeysValue;
 }
 
 export async function readGameConfig(env: Env): Promise<GameConfig> {
-  const [arenaVal, stats, special] = await Promise.all([
+  const [arenaVal, stats, special, beysRaw] = await Promise.all([
     readConfig(env, "arena") as Promise<{
       presets: { id: string; name: string; config: ArenaConfig }[];
       activeId: string;
@@ -76,6 +126,7 @@ export async function readGameConfig(env: Env): Promise<GameConfig> {
     }>,
     readConfig(env, "stats") as Promise<Record<string, BeybladeStats>>,
     readConfig(env, "special") as Promise<SpecialConfig>,
+    readConfig(env, "beys") as Promise<BeysValue>,
   ]);
   const active = arenaVal.presets.find((p) => p.id === arenaVal.activeId) ?? arenaVal.presets[0];
   // 隨機池：enabledIds 對回 presets（未知 id 靜默丟棄）；缺欄/解析後空 → 單場地 [activeId]
@@ -95,16 +146,19 @@ export async function readGameConfig(env: Env): Promise<GameConfig> {
     arenas: pool.map((p) => ({ id: p.id, name: p.name, config: { ...p.config } })),
     stats: mergedStats,
     special: { ...DEFAULT_SPECIAL, ...special },
+    // beys：非物件（壞 blob）→ 空覆寫；逐顆夾制在 applyBeyOverrides 做
+    beys: beysRaw && typeof beysRaw === "object" && !Array.isArray(beysRaw) ? beysRaw : {},
   };
 }
 
 export async function handleGetConfig(env: Env): Promise<Response> {
-  const [arena, stats, special] = await Promise.all([
+  const [arena, stats, special, beys] = await Promise.all([
     readConfig(env, "arena"),
     readConfig(env, "stats"),
     readConfig(env, "special"),
+    readConfig(env, "beys"),
   ]);
-  return Response.json({ arena, stats, special });
+  return Response.json({ arena, stats, special, beys });
 }
 
 /** 輕量 shape 驗證：擋掉明顯壞資料，不做全欄位 schema。 */
@@ -132,6 +186,13 @@ function isValidConfigValue(key: ConfigKey, value: unknown): boolean {
       if (!v.enabledIds.some((id) => ids.has(id as string))) return false;
     }
     return true;
+  }
+  if (key === "beys") {
+    // 整包形狀：{ beyId: { ...覆寫 } }——鍵必須存在於名冊、值必須是物件（欄位細節由 applyBeyOverrides 夾制）
+    if (Array.isArray(value)) return false;
+    return Object.entries(value as Record<string, unknown>).every(
+      ([id, v]) => !!getBey(id) && typeof v === "object" && v !== null && !Array.isArray(v),
+    );
   }
   return true; // stats / special：物件即可（欄位由前端 UI 控制）
 }

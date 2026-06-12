@@ -23,7 +23,7 @@ export interface BeybladeStats {
   stamina: number;
   /** 重量：質量，影響動量與被擊退/出界的難度 */
   weight: number;
-  /** 會心機率（每次碰撞、每側獨立判定；效果 = 對方該次傷害 ×2 或 擊退 ×2，50/50）。未設 = 0.05。可選 */
+  /** 會心機率（每次碰撞、每側獨立判定；效果 = 對方該次傷害 ×1.5 或 擊退 ×2，50/50）。未設 = 0.05。可選 */
   crit?: number;
   /** 必殺強度 s（1.0 基準）：必殺冷卻 ×(2−s)、rush/blast/clone 傷害 ×s。未設 = 1.0。可選 */
   specialPower?: number;
@@ -303,7 +303,7 @@ export interface CollisionEvent {
   dmgA?: number;
   /** B 實際扣血量（含 ±10% 浮動後的最終值）。可選 */
   dmgB?: number;
-  /** A 這次「被會心打」的效果（"dmg"=A 受到的傷害 ×2、"kb"=A 受到的擊退 ×2）。未會心 = 不帶。可選 */
+  /** A 這次「被會心打」的效果（"dmg"=A 受到的傷害 ×1.5、"kb"=A 受到的擊退 ×2）。未會心 = 不帶。可選 */
   critA?: "dmg" | "kb";
   /** B 這次「被會心打」的效果（同上）。可選 */
   critB?: "dmg" | "kb";
@@ -320,8 +320,21 @@ export interface DeathEvent {
 
 /** 必殺技數值（集中可調，每招獨立設定）。觸發模型＝冷卻 + 每回合限次 + 機率。 */
 export interface SpecialConfig {
-  /** 開場緩衝（秒）：t 小於此值時所有必殺技一律不得觸發（統一閘門） */
-  graceTime: number;
+  /**
+   * @deprecated 舊「統一開場緩衝」欄位（legacy）。存在時做為「所有未明示設定分招緩衝」的 fallback
+   * （simulate 合併設定時解析）；新設定請改用各招的 *GraceTime。可選。
+   */
+  graceTime?: number;
+  /** 衝刺：開場緩衝（秒）——t 小於此值不得觸發 */
+  rushGraceTime: number;
+  /** 衝擊：開場緩衝（秒） */
+  blastGraceTime: number;
+  /** 高速移動：開場緩衝（秒） */
+  dashGraceTime: number;
+  /** 旋渦：開場緩衝（秒） */
+  vortexGraceTime: number;
+  /** 分身：開場緩衝（秒） */
+  cloneGraceTime: number;
   /** 衝刺：觸發機率 0~1 */
   rushChance: number;
   /** 衝刺：進入此距離才可能觸發 */

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { SpecialConfig } from "../physics/types";
 import { PRESET_LABELS } from "../physics/presets";
 import { localTuningApi, type TuningStoreApi } from "../store/adminBackend";
+import { BEYBLADES, beyFullName } from "../game/beyblades";
 import BbIcon from "./ui/BbIcon.vue";
 
 // 資料源注入：不傳 = localStorage（測試頁用那份）；/admin/* 會傳 D1 遠端版
@@ -11,64 +11,14 @@ const props = withDefaults(defineProps<{ tuning?: TuningStoreApi; showGoBattle?:
   showGoBattle: true, // 線上(D1)模式會關掉：測試頁吃的是本機數值
 });
 const tuning = props.tuning ?? localTuningApi;
-const { stats, special, ready, error } = tuning;
+const { stats, beys, ready, error } = tuning;
 const resetStat = tuning.resetStat.bind(tuning);
 const resetAllStats = tuning.resetAllStats.bind(tuning);
-const resetSpecial = tuning.resetSpecial.bind(tuning);
+const resetBey = tuning.resetBey.bind(tuning);
 
 defineEmits<{ (e: "go-battle"): void }>();
 
-type SpField = { key: keyof SpecialConfig; label: string; min: number; max: number; step: number };
-const RUSH_FIELDS: SpField[] = [
-  { key: "rushChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
-  { key: "rushCooldown", label: "冷卻(秒)", min: 0.5, max: 30, step: 0.5 },
-  { key: "rushMaxUses", label: "每回合次數", min: 1, max: 9, step: 1 },
-  { key: "rushRange", label: "觸發距離", min: 40, max: 250, step: 10 },
-  { key: "rushDamage", label: "傷害", min: 0, max: 1200, step: 50 },
-  { key: "rushSpeed", label: "加速量", min: 0, max: 600, step: 20 },
-];
-const BLAST_FIELDS: SpField[] = [
-  { key: "blastChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
-  { key: "blastCooldown", label: "冷卻(秒)", min: 0.2, max: 30, step: 0.5 },
-  { key: "blastMaxUses", label: "每回合次數", min: 1, max: 9, step: 1 },
-  { key: "blastImpactMin", label: "撞擊門檻", min: 50, max: 400, step: 10 },
-  { key: "blastDamage", label: "傷害", min: 0, max: 1000, step: 50 },
-  { key: "blastPush", label: "彈開力道", min: 0, max: 700, step: 20 },
-];
-const DASH_FIELDS: SpField[] = [
-  { key: "dashChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
-  { key: "dashCooldown", label: "冷卻(秒)", min: 0.5, max: 30, step: 0.5 },
-  { key: "dashMaxUses", label: "每回合次數", min: 1, max: 9, step: 1 },
-  { key: "dashTriggerSpin", label: "觸發自旋比", min: 0.1, max: 0.9, step: 0.05 },
-  { key: "dashSpinRestore", label: "回補自旋", min: 0, max: 3000, step: 100 },
-  { key: "dashDuration", label: "加速時長(秒)", min: 0.5, max: 5, step: 0.25 },
-  { key: "dashAccel", label: "加速強度", min: 0, max: 1500, step: 50 },
-  { key: "dashMaxSpeedMul", label: "速度上限×", min: 0.2, max: 1, step: 0.05 },
-];
-const VORTEX_FIELDS: SpField[] = [
-  { key: "vortexChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
-  { key: "vortexCooldown", label: "冷卻(秒)", min: 0.5, max: 30, step: 0.5 },
-  { key: "vortexMaxUses", label: "每回合次數", min: 1, max: 9, step: 1 },
-  { key: "vortexRange", label: "觸發距離", min: 80, max: 350, step: 10 },
-  { key: "vortexPull", label: "吸引力道", min: 0, max: 800, step: 20 },
-  { key: "vortexSpinDrain", label: "抽旋/秒", min: 0, max: 800, step: 10 },
-  { key: "vortexDuration", label: "持續(秒)", min: 0.5, max: 5, step: 0.25 },
-];
-const CLONE_FIELDS: SpField[] = [
-  { key: "cloneChance", label: "觸發機率", min: 0, max: 1, step: 0.05 },
-  { key: "cloneCooldown", label: "冷卻(秒)", min: 0.5, max: 30, step: 0.5 },
-  { key: "cloneMaxUses", label: "每回合次數", min: 1, max: 5, step: 1 },
-  { key: "cloneRange", label: "召喚距離", min: 80, max: 400, step: 10 },
-  { key: "cloneDuration", label: "持續(秒)", min: 1, max: 8, step: 0.5 },
-  { key: "cloneAttackMul", label: "傷害倍率", min: 0.1, max: 1, step: 0.05 },
-  { key: "cloneSpin", label: "分身自旋", min: 500, max: 3000, step: 100 },
-  { key: "cloneHoming", label: "追擊強度", min: 0, max: 600, step: 20 },
-];
-function onSpecial() {
-  tuning.persistSpecial();
-}
-
-// 後台滑桿只調四圍（crit / specialPower 屬個體差，由 roster 定義、不在此調）→ key 收窄到四圍
+// 後台滑桿只調四圍（crit / specialPower 屬個體差，在下方「個體調整」區調）→ key 收窄到四圍
 const STAT_FIELDS: { key: "attack" | "defense" | "stamina" | "weight"; label: string; hint: string }[] = [
   { key: "attack", label: "攻擊", hint: "碰撞扣對手血量（耐久）+ 擊退" },
   { key: "defense", label: "防禦", hint: "減少自身受到的血量傷害 + 擊退" },
@@ -87,6 +37,23 @@ const typeKeys = computed(() => Object.keys(stats));
 
 function onInput() {
   tuning.persistStats();
+}
+
+/* ---------- 個體調整（10 顆名冊各自的 mods/crit/specialPower） ---------- */
+
+// mods 夾制範圍與 worker applyBeyOverrides 一致（0.8~1.2）；crit 0~0.25、specialPower 0.8~1.4
+const MOD_FIELDS: { key: "attack" | "defense" | "stamina" | "weight"; label: string }[] = [
+  { key: "attack", label: "攻擊×" },
+  { key: "defense", label: "防禦×" },
+  { key: "stamina", label: "續航×" },
+  { key: "weight", label: "重量×" },
+];
+
+// 遠端模式 beys 非同步載入（ready 前不渲染本區）；只渲染名冊內的顆（D1 多出的孤兒 id 不顯示）
+const rosterReady = computed(() => BEYBLADES.every((b) => !!beys[b.id]));
+
+function onBeyInput() {
+  tuning.persistBeys();
 }
 </script>
 
@@ -127,82 +94,30 @@ function onInput() {
     </div>
 
     <div class="special-head">
-      <h3><BbIcon name="lightning" :size="16" /> 必殺技數值（每招分開設定）</h3>
-      <button class="reset" @click="resetSpecial">還原預設</button>
+      <h3><BbIcon name="gear" :size="16" /> 個體調整（名冊 10 顆各自的個體差）</h3>
     </div>
-    <!-- 全招共通閘門：graceTime（引擎在 t < graceTime 一律不觸發必殺） -->
-    <div class="special-card grace-card">
-      <label class="field grace-field">
-        <span>開場緩衝（秒）——此時間內所有必殺技不會觸發 <b>{{ special.graceTime.toFixed(1) }}</b></span>
-        <input type="range" min="0" max="10" step="0.5" v-model.number="special.graceTime" @input="onSpecial" />
-      </label>
-    </div>
-    <div class="special-grid">
-      <div class="special-card">
-        <h4>衝刺突進</h4>
-        <p class="sp-hint">
-          <b>觸發</b>：逼近對手（進入觸發距離 {{ special.rushRange }}）時，以 {{ Math.round(special.rushChance * 100) }}% 機率發動，朝對手爆發加速衝撞 + 直接扣血。<br />
-          <b>限制</b>：發動後冷卻 <b>{{ special.rushCooldown }}s</b>、每回合最多 <b>{{ special.rushMaxUses }}</b> 次。
-        </p>
-        <div class="sp-grid">
-          <label v-for="f in RUSH_FIELDS" :key="f.key" class="field">
-            <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
-            <input type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="special[f.key]" @input="onSpecial" />
-          </label>
+    <p class="intro">
+      四欄倍率乘在「該類型基礎屬性」上（1.00＝不增減）；會心、必殺強度為絕對值。
+      伺服器套用時會夾制在 倍率 0.8~1.2、會心 0~0.25、必殺強度 0.8~1.4。必殺技數值請到「必殺技後台」調整。
+    </p>
+    <div v-if="rosterReady" class="bey-grid">
+      <div v-for="b in BEYBLADES" :key="b.id" class="bey-card" :style="{ borderColor: TYPE_COLORS[b.type] }">
+        <div class="type-head">
+          <h4 :style="{ color: TYPE_COLORS[b.type] }">{{ beyFullName(b) }}</h4>
+          <button class="reset" @click="resetBey(b.id)">還原</button>
         </div>
-      </div>
-      <div class="special-card">
-        <h4>衝擊</h4>
-        <p class="sp-hint">
-          <b>觸發</b>：自己打出的撞擊強度 &gt; {{ special.blastImpactMin }} 時，以 {{ Math.round(special.blastChance * 100) }}% 機率發動，把對手彈開 + 扣血（可順勢擊出界）。<br />
-          <b>限制</b>：發動後冷卻 <b>{{ special.blastCooldown }}s</b>、每回合最多 <b>{{ special.blastMaxUses }}</b> 次。
-        </p>
-        <div class="sp-grid">
-          <label v-for="f in BLAST_FIELDS" :key="f.key" class="field">
-            <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
-            <input type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="special[f.key]" @input="onSpecial" />
+        <div class="sp-grid bey-fields">
+          <label v-for="f in MOD_FIELDS" :key="f.key" class="field">
+            <span>{{ f.label }} <b>{{ beys[b.id].mods[f.key].toFixed(2) }}</b></span>
+            <input type="range" min="0.8" max="1.2" step="0.01" v-model.number="beys[b.id].mods[f.key]" @input="onBeyInput" />
           </label>
-        </div>
-      </div>
-
-      <div class="special-card">
-        <h4>高速移動</h4>
-        <p class="sp-hint">
-          <b>觸發</b>：自旋（續航）低於 {{ Math.round(special.dashTriggerSpin * 100) }}% 時，以 {{ Math.round(special.dashChance * 100) }}% 機率發動，回補 {{ special.dashSpinRestore }} 自旋（續命）+ {{ special.dashDuration }}s 移動加速（夾速度上限，不會自爆出界）。<br />
-          <b>限制</b>：冷卻 <b>{{ special.dashCooldown }}s</b>、每回合最多 <b>{{ special.dashMaxUses }}</b> 次。
-        </p>
-        <div class="sp-grid">
-          <label v-for="f in DASH_FIELDS" :key="f.key" class="field">
-            <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
-            <input type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="special[f.key]" @input="onSpecial" />
+          <label class="field">
+            <span>會心機率 <b>{{ (beys[b.id].crit * 100).toFixed(1) }}%</b></span>
+            <input type="range" min="0" max="0.25" step="0.005" v-model.number="beys[b.id].crit" @input="onBeyInput" />
           </label>
-        </div>
-      </div>
-
-      <div class="special-card">
-        <h4>旋渦</h4>
-        <p class="sp-hint">
-          <b>觸發</b>：對手進入 {{ special.vortexRange }} 距離時，以 {{ Math.round(special.vortexChance * 100) }}% 機率發動，{{ special.vortexDuration }}s 內把對手往自己拉 + 每秒抽乾對手 {{ special.vortexSpinDrain }} 自旋（拉進來磨，重型/防禦最爽）。<br />
-          <b>限制</b>：冷卻 <b>{{ special.vortexCooldown }}s</b>、每回合最多 <b>{{ special.vortexMaxUses }}</b> 次。
-        </p>
-        <div class="sp-grid">
-          <label v-for="f in VORTEX_FIELDS" :key="f.key" class="field">
-            <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
-            <input type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="special[f.key]" @input="onSpecial" />
-          </label>
-        </div>
-      </div>
-
-      <div class="special-card">
-        <h4>分身</h4>
-        <p class="sp-hint">
-          <b>觸發</b>：對手進入 {{ special.cloneRange }} 距離時，以 {{ Math.round(special.cloneChance * 100) }}% 機率召喚一個分身（傷害 ×{{ special.cloneAttackMul }}、{{ special.cloneDuration }}s 後消失、不計勝負）。<br />
-          <b>限制</b>：冷卻 <b>{{ special.cloneCooldown }}s</b>、每回合最多 <b>{{ special.cloneMaxUses }}</b> 次。
-        </p>
-        <div class="sp-grid">
-          <label v-for="f in CLONE_FIELDS" :key="f.key" class="field">
-            <span>{{ f.label }} <b>{{ special[f.key] % 1 === 0 ? special[f.key] : special[f.key].toFixed(2) }}</b></span>
-            <input type="range" :min="f.min" :max="f.max" :step="f.step" v-model.number="special[f.key]" @input="onSpecial" />
+          <label class="field">
+            <span>必殺強度 <b>{{ beys[b.id].specialPower.toFixed(2) }}</b></span>
+            <input type="range" min="0.8" max="1.4" step="0.05" v-model.number="beys[b.id].specialPower" @input="onBeyInput" />
           </label>
         </div>
       </div>
@@ -293,23 +208,21 @@ function onInput() {
   border-radius: 12px;
   padding: 14px 16px;
 }
-.special-card {
+.bey-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+.bey-card {
   background: var(--panel);
   border: 1px solid var(--line);
+  border-left-width: 4px;
   border-radius: 12px;
   padding: 14px 16px;
 }
-.sp-hint {
-  margin: 0 0 12px;
-  font-size: 12px;
-  color: var(--muted);
-}
-.grace-card {
-  padding: 12px 16px;
-}
-.grace-field {
-  margin-bottom: 0;
-  max-width: 460px;
+.bey-card h4 {
+  margin: 0;
+  font-size: 15px;
 }
 .sp-grid {
   display: grid;
@@ -367,7 +280,8 @@ function onInput() {
   cursor: pointer;
 }
 @media (max-width: 880px) {
-  .grid {
+  .grid,
+  .bey-grid {
     grid-template-columns: 1fr;
   }
   .head {

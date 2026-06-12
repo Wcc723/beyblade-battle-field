@@ -1,0 +1,902 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SFX PICK — 音效選樣室</title>
+<style>
+/* 色票對齊 src/styles/forge.css（BURST FORGE tokens）；單檔零依賴 */
+:root {
+  color-scheme: dark;
+  --bg: #0c0e12; --panel: #1b1e24; --panel-2: #22262e; --panel-3: #2b303a;
+  --line: #323845; --text: #dfe5ee; --muted: #8f99a8; --steel: #aab4c4;
+  --accent: #ffb31f; --lava: #ff7a18; --red: #e8442e; --blue: #2e9fe8; --ok: #57d96b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 18px 14px 60px; color: var(--text);
+  font-family: "Noto Sans TC", system-ui, sans-serif;
+  background:
+    radial-gradient(900px 480px at 50% -120px, rgba(255,122,24,.1), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(170,180,196,.03) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(60deg, rgba(170,180,196,.022) 0 1px, transparent 1px 42px),
+    var(--bg);
+  touch-action: manipulation;
+}
+main, header, .console, .foot { max-width: 920px; margin: 0 auto; }
+h1 {
+  margin: 0 0 4px; font-size: 26px; letter-spacing: .14em; font-weight: 800;
+  color: var(--accent); text-transform: uppercase;
+}
+h1 small { font-size: 14px; color: var(--steel); letter-spacing: .3em; margin-left: 10px; }
+.hint { margin: 0 0 16px; color: var(--muted); font-size: 13px; letter-spacing: .04em; line-height: 1.7; }
+
+/* 控制台（選擇總覽） */
+.console {
+  background: linear-gradient(180deg, #272c36, var(--panel) 42%, #14161c);
+  border: 1px solid var(--line); padding: 12px 14px; margin-bottom: 4px;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.ctl { display: grid; grid-template-columns: 110px 1fr 52px; gap: 10px; align-items: center; margin: 2px 0 10px; }
+.ctl label { font-size: 12px; letter-spacing: .16em; color: var(--accent); font-weight: 700; text-transform: uppercase; }
+.ctl label em { display: block; font-style: normal; color: var(--muted); font-weight: 400; letter-spacing: .02em; font-size: 11px; }
+.ctl output { font-variant-numeric: tabular-nums; color: var(--text); font-size: 13px; text-align: right; }
+input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
+.sum-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.f-label { font-size: 12px; letter-spacing: .14em; color: var(--accent); font-weight: 700; text-transform: uppercase; }
+#summary {
+  margin: 0; padding: 10px; max-height: 220px; overflow: auto;
+  background: #0b0d12; border: 1px solid var(--line);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--steel); white-space: pre;
+}
+.status { margin-top: 8px; font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+.status b { color: var(--steel); font-weight: 600; }
+.status.ok b { color: var(--ok); }
+.status.warn b { color: var(--red); }
+
+/* 槽位卡 */
+.slot {
+  margin: 14px auto; padding: 14px; border: 1px solid var(--line);
+  background: linear-gradient(180deg, #22262e, var(--panel) 50%, #15181e);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+.shead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.shead h2 { margin: 0; font-size: 16px; letter-spacing: .1em; color: var(--text); }
+.shead code {
+  font: 11px/1 ui-monospace, Menlo, Consolas, monospace; color: var(--muted);
+  border: 1px solid rgba(170,180,196,.3); background: rgba(170,180,196,.06); padding: 3px 7px;
+}
+.shead .picked { margin-left: auto; font-size: 11px; letter-spacing: .1em; color: var(--ok); }
+.opt {
+  display: flex; align-items: center; gap: 12px; padding: 7px 8px; margin: 4px 0;
+  background: rgba(11,13,18,.45); border: 1px solid transparent;
+}
+.opt.sel { border-color: rgba(255,179,31,.45); background: rgba(255,179,31,.06); }
+.opt label {
+  display: flex; align-items: center; gap: 9px; flex: 1; min-height: 32px;
+  cursor: pointer; font-size: 13px; letter-spacing: .04em; -webkit-tap-highlight-color: transparent;
+}
+.opt label small { color: var(--muted); font-size: 11px; }
+.opt input[type=radio] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+button.play, .sum-head button {
+  border: 0; cursor: pointer; min-height: 40px; padding: 8px 16px; flex: none;
+  font: 700 13px/1 "Noto Sans TC", system-ui, sans-serif; letter-spacing: .1em; color: var(--text);
+  background: linear-gradient(180deg, #3c434f, #23272f 55%, #181b21);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), inset 0 -3px 5px rgba(0,0,0,.6);
+  -webkit-tap-highlight-color: transparent;
+}
+button.play:hover, .sum-head button:hover { color: var(--accent); }
+button.play:active, .sum-head button:active { transform: translateY(2px); }
+button.play.err { color: #ffd9d2; background: linear-gradient(180deg, #ff7a64, var(--red) 42%, #8a1d10); }
+.files { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(50,56,69,.9); }
+.files .f-label { display: block; margin-bottom: 4px; }
+.none { font-size: 12px; color: var(--muted); letter-spacing: .06em; }
+.hazard { height: 5px; margin: 14px auto; max-width: 920px;
+  background: repeating-linear-gradient(-45deg, var(--accent) 0 9px, #14161b 9px 18px); opacity: .7; }
+.foot { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.foot b { color: var(--steel); }
+@media (max-width: 560px) {
+  body { padding: 14px 10px 56px; }
+  .opt { gap: 9px; }
+  button.play { padding: 8px 12px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>SFX PICK<small>音效選樣室</small></h1>
+  <p class="hint">
+    逐槽試聽（現役合成 / Lab 引擎 / 資料夾音檔）→ 點 radio 決定採用版本，
+    選擇即存 localStorage（鍵 <b>bb-sfx-picks</b>）。首次點擊頁面任意處解鎖音訊。
+    外部音檔請丟 <b>public/sfx-test/&lt;槽位&gt;/</b> 並在 manifest.json 登記（見 sfx-test/README.md）。
+  </p>
+</header>
+
+<section class="console">
+  <div class="ctl">
+    <label>Volume<em>主響度</em></label>
+    <input id="sl-vol" type="range" min="0" max="1" step="0.01" value="0.8">
+    <output id="val-vol">0.80</output>
+  </div>
+  <div class="sum-head">
+    <span class="f-label">目前選擇總覽（開發者直接讀這份）</span>
+    <button id="copyBtn" type="button">複製 JSON</button>
+  </div>
+  <pre id="summary"></pre>
+  <div class="status" id="mStatus"><b>資料夾音檔</b>：manifest.json 載入中…</div>
+  <div class="status" id="dStatus"><b>Lab D 取樣</b>：點擊任意處解鎖音訊後嘗試載入（/api/sfx/）；未載入時僅播合成骨架</div>
+</section>
+
+<main id="slots"></main>
+
+<div class="hazard"></div>
+<p class="foot">
+  <b>現役</b>＝src/audio/sfx.ts 目前線上版本（街機誇張 C 案）原樣移植；
+  <b>Lab A/B/D</b>＝public/sfx-lab.html 的引擎變體（僅撞擊與 KO 槽適用）；
+  <b>資料夾檔案</b>＝/sfx-test/manifest.json 登記的外部音檔。
+  所有音源走同一條響度鏈（compressor → makeup → limiter → soft-clip），比較基準一致。
+</p>
+
+<script>
+'use strict';
+/* ================================================================
+   SFX PICK — 音效選樣室
+   - 13 個槽位 × 多音源選項（現役 / Lab A/B/D / 資料夾檔案）
+   - radio 變更即存 localStorage `bb-sfx-picks`
+     格式：{ 槽位: { kind: "current"|"lab-a"|"lab-b"|"lab-d"|"file", src?: 路徑 } }
+   - 合成路徑：現役＝原樣移植 src/audio/sfx.ts；Lab＝原樣移植 sfx-lab.html
+   ================================================================ */
+
+/* ---- 槽位定義（lab=true 的槽位才有 Lab A/B/D 選項） ---- */
+var SLOTS = [
+  { id: 'hit-light',     name: '撞擊-輕',        lab: true,  s: 0.25 },
+  { id: 'hit-medium',    name: '撞擊-中',        lab: true,  s: 0.55 },
+  { id: 'hit-heavy',     name: '撞擊-重',        lab: true,  s: 0.95 },
+  { id: 'ko',            name: '擊破 KO',        lab: true },
+  { id: 'ring-out',      name: '出界' },
+  { id: 'spin-out',      name: '停轉' },
+  { id: 'launch',        name: '發射' },
+  { id: 'special-rush',  name: '必殺-rush',      special: 'rush' },
+  { id: 'special-blast', name: '必殺-blast',     special: 'blast' },
+  { id: 'special-dash',  name: '必殺-dash',      special: 'dash' },
+  { id: 'special-vortex',name: '必殺-vortex',    special: 'vortex' },
+  { id: 'special-clone', name: '必殺-clone',     special: 'clone' },
+  { id: 'win',           name: '勝利' },
+];
+var KIND_LABELS = {
+  current: ['現役', 'sfx.ts 目前版本'],
+  'lab-a': ['Lab A 鋼鐵重擊', 'FM 金屬體鳴 × 失真 × sub drop'],
+  'lab-b': ['Lab B 電影爆響', 'noise burst × 金屬 IR 卷積 × sub boom'],
+  'lab-d': ['Lab D 取樣混血', 'R2 取樣皮 × 合成骨（取樣未到僅骨架）'],
+};
+
+/* ================================================================
+   音訊核心：響度鏈與共用工具（原樣移植 sfx.ts / sfx-lab.html）
+   volume → comp → makeup → limiter → tanh soft-clip → destination
+   ================================================================ */
+var GLOBALS = { volume: 0.8, crunch: 0.5, ring: 0.5, sub: 0.6 }; // lab 定案值
+var MASTER_PARAMS = {
+  comp:    { threshold: -20, knee: 12, ratio: 4, attack: 0.004, release: 0.2 },
+  makeup:  1.8,
+  limiter: { threshold: -1.5, knee: 0, ratio: 20, attack: 0.001, release: 0.06 },
+  safetyK: 2.2, safetyCeil: 0.985,
+};
+
+var ctx = null, noiseBuf = null, masterInput = null;
+var bus = {};                               // A / D / S(現役共用) / F(外部檔案)
+var conv = null, bWet = null, bSoft = null; // B：卷積 / wet / soft-clip
+var cCrush = null, cComp = null;            // C（現役撞擊/KO）：bitcrusher / pump comp
+var curveCache = new Map();
+
+function qs(sel) { return document.querySelector(sel); }
+function jit(pct) { return 1 + (Math.random() * 2 - 1) * pct; }
+function now() { return ctx.currentTime; }
+
+function tanhCurve(drive) {
+  var key = 't' + Math.round(drive * 24);
+  if (curveCache.has(key)) return curveCache.get(key);
+  var k = 1.5 + drive * 46, n = 2048, c = new Float32Array(n), norm = Math.tanh(k);
+  for (var i = 0; i < n; i++) { var x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / norm; }
+  curveCache.set(key, c); return c;
+}
+function crushCurve(steps) {
+  var key = 'c' + steps;
+  if (curveCache.has(key)) return curveCache.get(key);
+  var n = 4096, c = new Float32Array(n);
+  for (var i = 0; i < n; i++) { var x = i / (n - 1) * 2 - 1; c[i] = Math.round(x * steps) / steps; }
+  curveCache.set(key, c); return c;
+}
+function makeDist(drive) {
+  var ws = ctx.createWaveShaper(); ws.curve = tanhCurve(drive); ws.oversample = '4x'; return ws;
+}
+/* 指數衰減包絡：0 → peak（attack）→ 0.0001（dur） */
+function env(g, t, peak, dur, attack) {
+  var a = attack === undefined ? 0.003 : attack;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(Math.max(0.0002, peak), t + a);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(a + 0.005, dur));
+}
+function toneAt(dest, t, dur, peak, type, f0, f1, attack) {
+  var o = ctx.createOscillator(); o.type = type;
+  o.frequency.setValueAtTime(Math.max(1, f0), t);
+  if (f1) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+  var g = ctx.createGain(); env(g, t, peak, dur, attack);
+  o.connect(g); g.connect(dest);
+  o.start(t); o.stop(t + dur + 0.06);
+}
+function burstNoise(dest, t, dur, peak, type, f0, f1, q) {
+  var src = ctx.createBufferSource(); src.buffer = noiseBuf;
+  var f = ctx.createBiquadFilter(); f.type = type; f.Q.value = q === undefined ? 0.9 : q;
+  f.frequency.setValueAtTime(Math.max(20, f0), t);
+  if (f1) f.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+  var g = ctx.createGain(); env(g, t, peak, dur, 0.002);
+  src.connect(f); f.connect(g); g.connect(dest);
+  src.start(t, Math.random() * 1.2, dur + 0.12);
+}
+
+/* ---- C（現役撞擊/KO）參數＝sfx.ts 定案值 ---- */
+var C_PARAMS = {
+  crushBase: 26, crushSpan: 20,
+  detunes: [-25, 0, 18],
+  dropF0: 620, dropSpan: 780,
+  dropTo: 74, dropTime: 0.06,
+  sqGain: 0.16,
+  subF0: 62, subF1: 36, subGain: 1.0,
+  comp: { threshold: -34, knee: 0, ratio: 18, attack: 0.001, release: 0.2, makeup: 2.3 },
+};
+
+function ensureCtx() {
+  if (ctx) return ctx;
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  ctx = new AC();
+
+  /* 響度鏈 */
+  masterInput = ctx.createGain(); masterInput.gain.value = GLOBALS.volume;
+  var comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = MASTER_PARAMS.comp.threshold;
+  comp.knee.value = MASTER_PARAMS.comp.knee;
+  comp.ratio.value = MASTER_PARAMS.comp.ratio;
+  comp.attack.value = MASTER_PARAMS.comp.attack;
+  comp.release.value = MASTER_PARAMS.comp.release;
+  var makeup = ctx.createGain(); makeup.gain.value = MASTER_PARAMS.makeup;
+  var limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = MASTER_PARAMS.limiter.threshold;
+  limiter.knee.value = MASTER_PARAMS.limiter.knee;
+  limiter.ratio.value = MASTER_PARAMS.limiter.ratio;
+  limiter.attack.value = MASTER_PARAMS.limiter.attack;
+  limiter.release.value = MASTER_PARAMS.limiter.release;
+  var safety = ctx.createWaveShaper(); safety.oversample = '2x';
+  (function () {
+    var n = 2048, c = new Float32Array(n), k = MASTER_PARAMS.safetyK, norm = Math.tanh(k);
+    for (var i = 0; i < n; i++) { var x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / norm * MASTER_PARAMS.safetyCeil; }
+    safety.curve = c;
+  })();
+  masterInput.connect(comp); comp.connect(makeup); makeup.connect(limiter);
+  limiter.connect(safety); safety.connect(ctx.destination);
+
+  /* 2 秒共用白噪 */
+  var n = Math.floor(ctx.sampleRate * 2);
+  noiseBuf = ctx.createBuffer(1, n, ctx.sampleRate);
+  var d = noiseBuf.getChannelData(0);
+  for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+
+  /* 匯流排：A / D / S(現役發射出界必殺勝利) / F(外部檔案) */
+  bus.A = ctx.createGain(); bus.A.gain.value = 0.9;  bus.A.connect(masterInput);
+  bus.D = ctx.createGain(); bus.D.gain.value = 0.95; bus.D.connect(masterInput);
+  bus.S = ctx.createGain(); bus.S.gain.value = 0.9;  bus.S.connect(masterInput);
+  bus.F = ctx.createGain(); bus.F.gain.value = 1.0;  bus.F.connect(masterInput);
+
+  /* B：dry → soft-clip → trim；send → convolver(程序化金屬IR) → wet → soft-clip */
+  bus.Btrim = ctx.createGain(); bus.Btrim.gain.value = 0.95; bus.Btrim.connect(masterInput);
+  bSoft = ctx.createWaveShaper(); bSoft.oversample = '2x'; bSoft.connect(bus.Btrim);
+  bSoft.curve = tanhCurve(B_PARAMS.softBase + B_PARAMS.softSpan * GLOBALS.crunch);
+  bus.Bdry = ctx.createGain(); bus.Bdry.connect(bSoft);
+  conv = ctx.createConvolver();
+  bWet = ctx.createGain(); bWet.gain.value = B_PARAMS.wetBase + B_PARAMS.wetSpan * GLOBALS.ring;
+  bus.Bsend = ctx.createGain(); bus.Bsend.connect(conv); conv.connect(bWet); bWet.connect(bSoft);
+  buildIR();
+
+  /* C（現役撞擊/KO）：crusher → pump comp → makeup → master；sub 直入 comp */
+  cComp = ctx.createDynamicsCompressor();
+  cComp.threshold.value = C_PARAMS.comp.threshold;
+  cComp.knee.value = C_PARAMS.comp.knee;
+  cComp.ratio.value = C_PARAMS.comp.ratio;
+  cComp.attack.value = C_PARAMS.comp.attack;
+  cComp.release.value = C_PARAMS.comp.release;
+  var cMake = ctx.createGain(); cMake.gain.value = C_PARAMS.comp.makeup;
+  cComp.connect(cMake); cMake.connect(masterInput);
+  cCrush = ctx.createWaveShaper(); cCrush.oversample = 'none';
+  cCrush.curve = crushCurve(Math.max(4, Math.round(C_PARAMS.crushBase - C_PARAMS.crushSpan * GLOBALS.crunch)));
+  cCrush.connect(cComp);
+  return ctx;
+}
+function unlock() {
+  if (!ensureCtx()) return;
+  if (ctx.state === 'suspended') ctx.resume();
+  loadDSamples();
+}
+
+/* ================================================================
+   現役（src/audio/sfx.ts 原樣移植，dest 改本頁匯流排）
+   ================================================================ */
+var cur = {
+  /* playCollision：s＝impact/260（輕 0.25 / 中 0.55 / 重 0.95） */
+  hit: function (s) {
+    if (!ensureCtx()) return;
+    var P = C_PARAMS;
+    var t = now() + 0.001 + Math.random() * 0.004;
+    var fStart = (P.dropF0 + P.dropSpan * s) * jit(0.07);
+    var dropT = P.dropTime + 0.035 * s;
+    var dur = 0.1 + 0.1 * s;
+    for (var k = 0; k < P.detunes.length; k++) {
+      var o1 = ctx.createOscillator(); o1.type = 'square'; o1.detune.value = P.detunes[k];
+      o1.frequency.setValueAtTime(fStart, t);
+      o1.frequency.exponentialRampToValueAtTime(P.dropTo + 50 * s, t + dropT);
+      var g1 = ctx.createGain(); env(g1, t, P.sqGain * (0.4 + 0.6 * s), dur, 0.002);
+      o1.connect(g1); g1.connect(cCrush);
+      o1.start(t); o1.stop(t + dur + 0.05);
+    }
+    burstNoise(cCrush, t, 0.07 + 0.05 * s, 0.25 + 0.35 * s, 'bandpass', 1900, 320);
+    var o = ctx.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(P.subF0 + 10 * s, t);
+    o.frequency.exponentialRampToValueAtTime(P.subF1, t + 0.16);
+    var lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 140;
+    var g = ctx.createGain(); env(g, t, (0.5 + 0.6 * s) * GLOBALS.sub * P.subGain, 0.18 + 0.06 * s);
+    o.connect(lp); lp.connect(g); g.connect(cComp);
+    o.start(t); o.stop(t + 0.32);
+  },
+  ko: function () {
+    if (!ensureCtx()) return;
+    var t = now() + 0.002;
+    var stack = [['sawtooth', 0], ['square', -30], ['square', 25]];
+    for (var k = 0; k < stack.length; k++) {
+      var o1 = ctx.createOscillator(); o1.type = stack[k][0]; o1.detune.value = stack[k][1];
+      o1.frequency.setValueAtTime(1500 * jit(0.05), t);
+      o1.frequency.exponentialRampToValueAtTime(36, t + 0.42);
+      var g1 = ctx.createGain(); env(g1, t, 0.2, 0.55, 0.003);
+      o1.connect(g1); g1.connect(cCrush);
+      o1.start(t); o1.stop(t + 0.65);
+    }
+    burstNoise(cCrush, t, 0.5, 0.65, 'lowpass', 2600, 90);
+    burstNoise(cCrush, t, 0.04, 0.5, 'highpass', 3000);
+    var o = ctx.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(70, t);
+    o.frequency.exponentialRampToValueAtTime(30, t + 0.5);
+    var lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 140;
+    var g = ctx.createGain(); env(g, t, 1.2 * GLOBALS.sub, 0.55);
+    o.connect(lp); lp.connect(g); g.connect(cComp);
+    o.start(t); o.stop(t + 0.65);
+  },
+  /* playLaunch v3「溫和起轉」 */
+  launch: function () {
+    if (!ensureCtx()) return;
+    var t = now() + 0.002;
+    burstNoise(bus.S, t, 0.025, 0.14, 'bandpass', 1600);
+    toneAt(bus.S, t, 0.1, 0.15 + 0.18 * GLOBALS.sub, 'sine', 150, 64);
+    var SPIN_T = 0.3;
+    var o = ctx.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(160 * jit(0.05), t + 0.01);
+    o.frequency.exponentialRampToValueAtTime(850, t + 0.01 + SPIN_T);
+    var bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.9;
+    bp.frequency.setValueAtTime(420, t + 0.01);
+    bp.frequency.exponentialRampToValueAtTime(1900, t + 0.01 + SPIN_T);
+    var g = ctx.createGain(); env(g, t + 0.01, 0.16, SPIN_T + 0.1, 0.035);
+    var lfo = ctx.createOscillator(); lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(18, t + 0.01);
+    lfo.frequency.exponentialRampToValueAtTime(60, t + 0.01 + SPIN_T);
+    var depth = ctx.createGain(); depth.gain.value = 0.28;
+    lfo.connect(depth); depth.connect(g.gain);
+    o.connect(bp); bp.connect(g); g.connect(bus.S);
+    o.start(t + 0.01); o.stop(t + 0.01 + SPIN_T + 0.14);
+    lfo.start(t + 0.01); lfo.stop(t + 0.01 + SPIN_T + 0.14);
+    burstNoise(bus.S, t + 0.02, SPIN_T, 0.09, 'bandpass', 650, 2400);
+    burstNoise(bus.S, t + SPIN_T, 0.3, 0.05, 'bandpass', 1200, 750, 3);
+  },
+  ringOut: function () {
+    if (!ensureCtx()) return;
+    var t = now() + 0.002;
+    burstNoise(bus.S, t, 0.5, 0.3, 'bandpass', 520, 3900);
+    toneAt(bus.S, t, 0.48, 0.22, 'sine', 330, 1480);
+    toneAt(bus.S, t + 0.05, 0.42, 0.12, 'triangle', 250, 1020);
+    toneAt(bus.S, t + 0.1, 0.4, 0.06, 'sine', 2600, 5200);
+  },
+  spinOut: function () {
+    if (!ensureCtx()) return;
+    toneAt(bus.S, now() + 0.002, 0.7, 0.18, 'triangle', 440, 70);
+  },
+  special: function (kind) {
+    if (!ensureCtx()) return;
+    var t = now() + 0.002;
+    var bases = { rush: 320, blast: 200, dash: 540, vortex: 230, clone: 400 };
+    var base = bases[kind] || 300;
+    toneAt(bus.S, t, 0.26, 0.16, 'sawtooth', base, base * 2.4);
+    toneAt(bus.S, t, 0.3, 0.09, 'sine', base * 1.5, base * 3);
+  },
+  win: function () {
+    if (!ensureCtx()) return;
+    var t = now() + 0.002;
+    var notes = [523, 659, 784];
+    for (var i = 0; i < notes.length; i++) toneAt(bus.S, t + i * 0.11, 0.26, 0.2, 'triangle', notes[i]);
+  },
+};
+
+/* ================================================================
+   Lab A：鋼鐵重擊（sfx-lab 原樣移植）
+   ================================================================ */
+var A_PARAMS = {
+  partials: [1, 2.76, 5.40, 8.93],
+  partialAmp: 0.62,
+  fmRatio: 3.51,
+  f0Base: 168, f0Span: 220,
+  bodyGain: 0.5,
+  driveBase: 0.3, driveSpan: 0.65,
+  distOut: 0.65,
+  subF0: 52, subF1: 28,
+  subGain: 0.85, subDur: 0.22,
+};
+var engineA = {
+  strike: function (t, s, f0, ringMul) {
+    var P = A_PARAMS, G = GLOBALS;
+    var dist = makeDist(P.driveBase + P.driveSpan * G.crunch);
+    var out = ctx.createGain(); out.gain.value = P.distOut;
+    dist.connect(out); out.connect(bus.A);
+    var mod = ctx.createOscillator(); mod.type = 'sine'; mod.frequency.value = f0 * P.fmRatio;
+    var mg = ctx.createGain();
+    var idx = f0 * (1.0 + 2.2 * s + 1.8 * G.crunch);
+    mg.gain.setValueAtTime(idx, t);
+    mg.gain.exponentialRampToValueAtTime(Math.max(1, idx * 0.04), t + 0.09);
+    mod.connect(mg);
+    var ringDur = (0.07 + 0.3 * G.ring) * (0.6 + 0.8 * s) * ringMul;
+    P.partials.forEach(function (r, i) {
+      var o = ctx.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(f0 * r * jit(0.012), t);
+      mg.connect(o.frequency);
+      var g = ctx.createGain();
+      var amp = P.bodyGain * (0.35 + 0.65 * s) * Math.pow(P.partialAmp, i);
+      var dur = Math.max(0.03, ringDur * (1 - i * 0.15));
+      env(g, t, amp, dur);
+      o.connect(g); g.connect(dist);
+      o.start(t); o.stop(t + dur + 0.06);
+    });
+    mod.start(t); mod.stop(t + ringDur + 0.12);
+  },
+  hit: function (s) {
+    if (!ensureCtx()) return;
+    var P = A_PARAMS, t = now() + 0.001 + Math.random() * 0.005;
+    this.strike(t, s, (P.f0Base + P.f0Span * s) * jit(0.06), 1);
+    burstNoise(bus.A, t, 0.004 + 0.004 * s, 0.3 + 0.45 * s, 'highpass', 5200);
+    toneAt(bus.A, t, P.subDur + 0.08 * s, (0.4 + 0.6 * s) * GLOBALS.sub * P.subGain, 'sine', P.subF0 + 10 * s, P.subF1);
+  },
+  ko: function () {
+    if (!ensureCtx()) return;
+    var t = now() + 0.002;
+    this.strike(t, 1.0, 96, 1.6);
+    this.strike(t + 0.055, 0.8, 72, 2.2);
+    burstNoise(bus.A, t, 0.05, 0.6, 'highpass', 3000);
+    burstNoise(bus.A, t, 0.4, 0.7, 'lowpass', 2200, 140);
+    toneAt(bus.A, t, 0.55, 1.1 * GLOBALS.sub, 'sine', 62, 24);
+    toneAt(bus.A, t + 0.06, 0.5, 0.5 * GLOBALS.sub, 'triangle', 44, 22);
+  },
+};
+
+/* ================================================================
+   Lab B：電影爆響（sfx-lab 原樣移植）
+   ================================================================ */
+var B_PARAMS = {
+  irModes: [641, 1209, 2034, 3157, 4519],
+  irDurBase: 0.4, irDurSpan: 1.5,
+  irNoiseTau: 0.08, irNoiseTauSpan: 0.3,
+  wetBase: 0.25, wetSpan: 0.9,
+  softBase: 0.1, softSpan: 0.32,
+  layers: [
+    { dl: 0,     dur: 0.09, peak: 0.55, type: 'bandpass', f0: 2600, f1: 520, send: 0.8 },
+    { dl: 0.008, dur: 0.15, peak: 0.42, type: 'bandpass', f0: 1150, f1: 300, send: 0.9 },
+    { dl: 0,     dur: 0.03, peak: 0.35, type: 'highpass', f0: 4200, f1: 0,   send: 0.6 },
+  ],
+  subF0: 54, subF1: 34, subGain: 0.95,
+};
+function buildIR() {
+  if (!ctx) return;
+  var P = B_PARAMS, ring = GLOBALS.ring;
+  var dur = P.irDurBase + P.irDurSpan * ring;
+  var sr = ctx.sampleRate, len = Math.max(64, Math.floor(sr * dur));
+  var buf = ctx.createBuffer(2, len, sr);
+  var nTau = P.irNoiseTau + P.irNoiseTauSpan * ring;
+  for (var ch = 0; ch < 2; ch++) {
+    var d = buf.getChannelData(ch);
+    var phases = P.irModes.map(function () { return Math.random() * 6.28318; });
+    var det = P.irModes.map(function () { return 1 + (Math.random() * 2 - 1) * 0.012; });
+    for (var i = 0; i < len; i++) {
+      var t = i / sr;
+      var v = (Math.random() * 2 - 1) * Math.exp(-t / nTau) * 0.7;
+      for (var m = 0; m < P.irModes.length; m++) {
+        v += Math.sin(6.28318 * P.irModes[m] * det[m] * t + phases[m])
+           * Math.exp(-t / (nTau * 1.8 + 0.05)) * (0.18 / (1 + m * 0.7));
+      }
+      d[i] = v;
+    }
+  }
+  conv.buffer = buf;
+}
+function bNoise(t, dur, peak, type, f0, f1, send) {
+  var src = ctx.createBufferSource(); src.buffer = noiseBuf;
+  var f = ctx.createBiquadFilter(); f.type = type; f.Q.value = 0.9;
+  f.frequency.setValueAtTime(Math.max(20, f0), t);
+  if (f1) f.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+  var g = ctx.createGain(); env(g, t, peak, dur, 0.002);
+  src.connect(f); f.connect(g);
+  g.connect(bus.Bdry);
+  var sg = ctx.createGain(); sg.gain.value = send;
+  g.connect(sg); sg.connect(bus.Bsend);
+  src.start(t, Math.random() * 1.2, dur + 0.12);
+}
+var engineB = {
+  hit: function (s) {
+    if (!ensureCtx()) return;
+    var P = B_PARAMS, t = now() + 0.001 + Math.random() * 0.005;
+    var br = 0.55 + 0.6 * s;
+    for (var i = 0; i < P.layers.length; i++) {
+      var L = P.layers[i];
+      bNoise(t + L.dl, L.dur + 0.05 * s, L.peak * (0.4 + 0.75 * s), L.type, L.f0 * br, L.f1 ? L.f1 : 0, L.send);
+    }
+    toneAt(bus.Bdry, t, 0.24 + 0.1 * s, (0.35 + 0.6 * s) * GLOBALS.sub * P.subGain, 'sine', P.subF0 + 8 * s, P.subF1);
+  },
+  ko: function () {
+    if (!ensureCtx()) return;
+    var t = now() + 0.002;
+    bNoise(t, 0.05, 0.55, 'highpass', 3500, 0, 1.0);
+    bNoise(t, 0.55, 0.85, 'lowpass', 2400, 90, 1.1);
+    bNoise(t + 0.02, 0.3, 0.4, 'bandpass', 900, 180, 1.2);
+    toneAt(bus.Bdry, t, 0.5, 1.05 * GLOBALS.sub, 'sine', 58, 30);
+    toneAt(bus.Bdry, t + 0.07, 0.45, 0.5 * GLOBALS.sub, 'triangle', 42, 24);
+  },
+};
+
+/* ================================================================
+   Lab D：取樣混血（sfx-lab 原樣移植；取樣 /api/sfx/ 未到時僅合成骨架）
+   ================================================================ */
+var D_PARAMS = {
+  rateJit: 0.09, rateWeight: 0.12,
+  gainBase: 0.5, gainSpan: 0.55,
+  dryMix: 0.7,
+  wetBase: 0.3, wetSpan: 0.65,
+  driveBase: 0.3, driveSpan: 0.6,
+  subF0: 50, subF1: 30, subGain: 0.8,
+};
+var SAMPLE_SETS = {
+  hitL: ['hit-l-0', 'hit-l-1', 'hit-l-2', 'hit-l-3', 'hit-l-4'],
+  hitM: ['hit-m-0', 'hit-m-1', 'hit-m-2', 'hit-m-3', 'hit-m-4'],
+  hitH: ['hit-h-0', 'hit-h-1', 'hit-h-2', 'hit-h-3', 'hit-h-4'],
+  ko:   ['ko-0', 'ko-1', 'ko-2', 'ko-3', 'ko-4'],
+};
+var sampleBufs = new Map();
+var lastPick = {};
+var dLoadStarted = false;
+function loadDSamples() {
+  if (dLoadStarted || !ctx) return;
+  dLoadStarted = true;
+  var all = [];
+  Object.keys(SAMPLE_SETS).forEach(function (setName) {
+    SAMPLE_SETS[setName].forEach(function (nm) {
+      all.push(
+        fetch('/api/sfx/' + nm + '.wav')
+          .then(function (r) { return r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)); })
+          .then(function (ab) { return ctx.decodeAudioData(ab); })
+          .then(function (buf) { sampleBufs.set(nm, buf); })
+          .catch(function () {})
+      );
+    });
+  });
+  Promise.all(all).then(function () {
+    var el = qs('#dStatus');
+    if (sampleBufs.size === 0) {
+      el.className = 'status warn';
+      el.innerHTML = '<b>Lab D 取樣</b>：未載入（/api/sfx/ 無檔）—— Lab D 僅播合成骨架';
+    } else {
+      el.className = 'status ok';
+      el.innerHTML = '<b>Lab D 取樣</b>：已載入 ' + sampleBufs.size + ' 檔';
+    }
+  });
+}
+function pickSample(setName) {
+  var names = SAMPLE_SETS[setName];
+  var avail = [];
+  for (var i = 0; i < names.length; i++) if (sampleBufs.has(names[i])) avail.push({ n: names[i], i: i });
+  if (!avail.length) return null;
+  var pick = avail[Math.floor(Math.random() * avail.length)];
+  if (avail.length > 1 && pick.i === lastPick[setName]) pick = avail[(avail.indexOf(pick) + 1) % avail.length];
+  lastPick[setName] = pick.i;
+  return sampleBufs.get(pick.n);
+}
+function playSkin(buf, t, gain, rate) {
+  var P = D_PARAMS;
+  var src = ctx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
+  var g = ctx.createGain(); g.gain.value = gain;
+  src.connect(g);
+  var dry = ctx.createGain(); dry.gain.value = P.dryMix;
+  g.connect(dry); dry.connect(bus.D);
+  var ws = makeDist(P.driveBase + P.driveSpan * GLOBALS.crunch);
+  var wet = ctx.createGain(); wet.gain.value = P.wetBase + P.wetSpan * GLOBALS.crunch;
+  g.connect(ws); ws.connect(wet); wet.connect(bus.D);
+  src.start(t);
+}
+var engineD = {
+  hit: function (s) {
+    if (!ensureCtx()) return;
+    var P = D_PARAMS, t = now() + 0.002;
+    toneAt(bus.D, t, 0.16 + 0.1 * s, (0.35 + 0.55 * s) * GLOBALS.sub * P.subGain, 'sine', P.subF0 + 12 * s, P.subF1);
+    if (s > 0.45) burstNoise(bus.D, t, 0.006, 0.22 + 0.3 * (s - 0.45), 'highpass', 5600);
+    var buf = pickSample(s < 0.38 ? 'hitL' : s < 0.72 ? 'hitM' : 'hitH');
+    if (!buf) return;
+    playSkin(buf, t, P.gainBase + P.gainSpan * s, jit(P.rateJit) * (1.06 - P.rateWeight * s));
+  },
+  ko: function () {
+    if (!ensureCtx()) return;
+    var t = now() + 0.002;
+    var buf = pickSample('ko');
+    if (buf) playSkin(buf, t, 1.0, jit(0.06));
+    toneAt(bus.D, t, 0.5, 1.0 * GLOBALS.sub, 'sine', 56, 26);
+    toneAt(bus.D, t + 0.06, 0.45, 0.45 * GLOBALS.sub, 'triangle', 40, 24);
+    burstNoise(bus.D, t, 0.04, 0.4, 'highpass', 2800);
+  },
+};
+
+/* ================================================================
+   外部音檔播放（/sfx-test/...；fetch+decode 後快取）
+   ================================================================ */
+var fileBufs = new Map();   // src → AudioBuffer
+var fileLoading = new Map(); // src → Promise
+function playFile(src, btn) {
+  if (!ensureCtx()) return;
+  var hit = fileBufs.get(src);
+  if (hit) {
+    var s = ctx.createBufferSource(); s.buffer = hit;
+    s.connect(bus.F); s.start(now() + 0.002);
+    return;
+  }
+  var p = fileLoading.get(src);
+  if (!p) {
+    var orig = btn ? btn.textContent : '';
+    if (btn) btn.textContent = '載入中';
+    p = fetch(src)
+      .then(function (r) { return r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)); })
+      .then(function (ab) { return ctx.decodeAudioData(ab); })
+      .then(function (buf) { fileBufs.set(src, buf); return buf; });
+    fileLoading.set(src, p);
+    p.then(function () { if (btn) { btn.textContent = orig || '試聽'; btn.classList.remove('err'); } })
+     .catch(function () {
+       fileLoading.delete(src);
+       if (btn) { btn.textContent = '載入失敗'; btn.classList.add('err'); }
+     });
+  }
+  p.then(function (buf) {
+    var s = ctx.createBufferSource(); s.buffer = buf;
+    s.connect(bus.F); s.start(now() + 0.002);
+  }).catch(function () {});
+}
+
+/* ================================================================
+   播放派發：(slot, kind, src) → 對應音源
+   ================================================================ */
+function slotDef(id) {
+  for (var i = 0; i < SLOTS.length; i++) if (SLOTS[i].id === id) return SLOTS[i];
+  return null;
+}
+function playOption(slotId, kind, src, btn) {
+  var def = slotDef(slotId);
+  if (!def) return;
+  if (kind === 'file') { playFile(src, btn); return; }
+  if (kind === 'current') {
+    if (def.s !== undefined) cur.hit(def.s);
+    else if (slotId === 'ko') cur.ko();
+    else if (slotId === 'ring-out') cur.ringOut();
+    else if (slotId === 'spin-out') cur.spinOut();
+    else if (slotId === 'launch') cur.launch();
+    else if (def.special) cur.special(def.special);
+    else if (slotId === 'win') cur.win();
+    return;
+  }
+  var eng = kind === 'lab-a' ? engineA : kind === 'lab-b' ? engineB : kind === 'lab-d' ? engineD : null;
+  if (!eng || !def.lab) return;
+  if (def.s !== undefined) eng.hit(def.s); else eng.ko();
+}
+
+/* ================================================================
+   選擇持久化：localStorage `bb-sfx-picks`
+   { 槽位: { kind: "current"|"lab-a"|"lab-b"|"lab-d"|"file", src?: 路徑 } }
+   ================================================================ */
+var PICK_KEY = 'bb-sfx-picks';
+var picks = {};
+(function initPicks() {
+  var stored = {};
+  try { stored = JSON.parse(localStorage.getItem(PICK_KEY) || '{}') || {}; } catch (e) { stored = {}; }
+  SLOTS.forEach(function (def) {
+    var p = stored[def.id];
+    picks[def.id] = (p && typeof p.kind === 'string')
+      ? (p.kind === 'file' && typeof p.src === 'string' ? { kind: 'file', src: p.src } : { kind: p.kind })
+      : { kind: 'current' }; // 預設：現役
+  });
+})();
+function savePicks() {
+  try { localStorage.setItem(PICK_KEY, JSON.stringify(picks)); } catch (e) {}
+}
+function renderSummary() {
+  qs('#summary').textContent = JSON.stringify(picks, null, 2);
+  /* 各槽位卡片右上角同步顯示目前選擇 */
+  SLOTS.forEach(function (def) {
+    var el = document.querySelector('.slot[data-slot="' + def.id + '"] .picked');
+    if (!el) return;
+    var p = picks[def.id];
+    el.textContent = p.kind === 'file'
+      ? '已選：' + String(p.src).split('/').pop()
+      : '已選：' + (KIND_LABELS[p.kind] ? KIND_LABELS[p.kind][0] : p.kind);
+  });
+}
+
+/* ================================================================
+   DOM 建構：槽位卡 × 選項列（播放鍵 + radio）
+   ================================================================ */
+function makeOptionRow(slotId, kind, src, labelMain, labelSub) {
+  var row = document.createElement('div');
+  row.className = 'opt';
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'play'; btn.textContent = '試聽';
+  btn.dataset.slot = slotId; btn.dataset.kind = kind;
+  if (src) btn.dataset.src = src;
+  var label = document.createElement('label');
+  var radio = document.createElement('input');
+  radio.type = 'radio'; radio.name = 'pick-' + slotId;
+  radio.dataset.slot = slotId; radio.dataset.kind = kind;
+  if (src) radio.dataset.src = src;
+  var p = picks[slotId];
+  radio.checked = p.kind === kind && (kind !== 'file' || p.src === src);
+  if (radio.checked) row.classList.add('sel');
+  label.appendChild(radio);
+  var span = document.createElement('span');
+  span.textContent = labelMain;
+  if (labelSub) {
+    var small = document.createElement('small');
+    small.textContent = ' — ' + labelSub;
+    span.appendChild(small);
+  }
+  label.appendChild(span);
+  row.appendChild(btn);
+  row.appendChild(label);
+  return row;
+}
+function buildSlots() {
+  var root = qs('#slots');
+  SLOTS.forEach(function (def) {
+    var card = document.createElement('section');
+    card.className = 'slot'; card.dataset.slot = def.id;
+    var head = document.createElement('div');
+    head.className = 'shead';
+    var h2 = document.createElement('h2'); h2.textContent = def.name;
+    var code = document.createElement('code'); code.textContent = def.id;
+    var picked = document.createElement('span'); picked.className = 'picked';
+    head.appendChild(h2); head.appendChild(code); head.appendChild(picked);
+    card.appendChild(head);
+
+    var kinds = def.lab ? ['current', 'lab-a', 'lab-b', 'lab-d'] : ['current'];
+    kinds.forEach(function (k) {
+      card.appendChild(makeOptionRow(def.id, k, null, KIND_LABELS[k][0], KIND_LABELS[k][1]));
+    });
+
+    var files = document.createElement('div');
+    files.className = 'files';
+    var fl = document.createElement('span');
+    fl.className = 'f-label'; fl.textContent = '資料夾檔案';
+    files.appendChild(fl);
+    var none = document.createElement('span');
+    none.className = 'none'; none.textContent = '載入中…';
+    files.appendChild(none);
+    card.appendChild(files);
+    root.appendChild(card);
+  });
+}
+
+/* ---- manifest.json → 外部音檔選項 ---- */
+function loadManifest() {
+  fetch('/sfx-test/manifest.json', { cache: 'no-cache' })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
+    .then(function (man) {
+      var total = 0;
+      SLOTS.forEach(function (def) {
+        var filesEl = document.querySelector('.slot[data-slot="' + def.id + '"] .files');
+        var noneEl = filesEl.querySelector('.none');
+        var list = Array.isArray(man[def.id]) ? man[def.id] : [];
+        if (!list.length) { noneEl.textContent = '未提供'; return; }
+        noneEl.remove();
+        list.forEach(function (fname) {
+          var src = '/sfx-test/' + def.id + '/' + String(fname);
+          /* 檔名含子路徑（pack-a/x.wav）時直接掛在 /sfx-test/ 下 */
+          if (String(fname).indexOf('/') >= 0) src = '/sfx-test/' + String(fname);
+          filesEl.appendChild(makeOptionRow(def.id, 'file', src, String(fname).split('/').pop(), src));
+          total++;
+        });
+      });
+      var ms = qs('#mStatus');
+      ms.className = 'status ok';
+      ms.innerHTML = '<b>資料夾音檔</b>：manifest 已載入，' + total + ' 檔登記';
+      renderSummary(); // file radio 可能對應已存選擇 → 重畫選取框
+      markSelectedRows();
+    })
+    .catch(function () {
+      SLOTS.forEach(function (def) {
+        var noneEl = document.querySelector('.slot[data-slot="' + def.id + '"] .files .none');
+        if (noneEl) noneEl.textContent = '未提供';
+      });
+      var ms = qs('#mStatus');
+      ms.className = 'status warn';
+      ms.innerHTML = '<b>資料夾音檔</b>：manifest.json 讀取失敗（未提供）';
+    });
+}
+function markSelectedRows() {
+  document.querySelectorAll('.opt').forEach(function (row) {
+    var r = row.querySelector('input[type=radio]');
+    row.classList.toggle('sel', !!(r && r.checked));
+  });
+}
+
+/* ================================================================
+   事件：播放（委派）＋ radio 變更即存 ＋ 複製 JSON ＋ 音量
+   ================================================================ */
+document.addEventListener('pointerdown', unlock);
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('button.play');
+  if (!b) return;
+  unlock();
+  if (!ctx) return;
+  playOption(b.dataset.slot, b.dataset.kind, b.dataset.src || null, b);
+});
+document.addEventListener('change', function (e) {
+  var r = e.target;
+  if (!r || r.type !== 'radio' || !r.dataset.slot) return;
+  picks[r.dataset.slot] = r.dataset.kind === 'file'
+    ? { kind: 'file', src: r.dataset.src }
+    : { kind: r.dataset.kind };
+  savePicks();
+  renderSummary();
+  markSelectedRows();
+});
+qs('#copyBtn').addEventListener('click', function () {
+  var btn = qs('#copyBtn');
+  var json = JSON.stringify(picks, null, 2);
+  var done = function () {
+    btn.textContent = '已複製';
+    setTimeout(function () { btn.textContent = '複製 JSON'; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(json).then(done).catch(function () { fallbackCopy(json, done); });
+  } else {
+    fallbackCopy(json, done);
+  }
+});
+function fallbackCopy(text, done) {
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+  done();
+}
+(function bindVolume() {
+  var el = qs('#sl-vol'), out = qs('#val-vol');
+  el.addEventListener('input', function () {
+    GLOBALS.volume = parseFloat(el.value);
+    out.textContent = GLOBALS.volume.toFixed(2);
+    if (masterInput) masterInput.gain.setTargetAtTime(GLOBALS.volume, ctx.currentTime, 0.02);
+  });
+})();
+
+/* ---- 啟動 ---- */
+buildSlots();
+renderSummary();
+loadManifest();
+</script>
+</body>
+</html>

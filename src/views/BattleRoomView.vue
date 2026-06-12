@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import ArenaSvg from "../components/ArenaSvg.vue";
 import BbIcon from "../components/ui/BbIcon.vue";
 import { useBattle } from "../composables/useBattle";
@@ -9,6 +9,7 @@ import { beyFullName, DEFAULT_LINEUP, getBey } from "../game/beyblades";
 import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../physics/types";
 
 const route = useRoute();
+const router = useRouter();
 const code = String(route.params.code ?? "").toUpperCase();
 
 const online = useOnlineBattle(code, { bot: route.query.bot === "1" });
@@ -55,14 +56,27 @@ async function loadServerConfig(attempt = 0): Promise<void> {
 
 // 自己的出賽陣容（D1 user_settings.lineup）：抽屜「出賽陀螺」選單的選項來源。
 // 失敗回落 DEFAULT_LINEUP（與 DO readLineup 同一套 fallback → 選項至少與伺服器一致）。
+// 同一趟順便套用「操作偏好」：發射模式 / 音效開關 / 回放倍速（之前漏接 → 個人設定的
+// 發射模式對線上對戰無效的 bug；useBattle 預設 sling，這裡以伺服器設定覆寫）。
 const myLineup = ref<{ beyId: string; special: string }[]>([...DEFAULT_LINEUP]);
 let lineupRetry: ReturnType<typeof setTimeout> | undefined;
 async function loadMyLineup(attempt = 0): Promise<void> {
   try {
     const res = await fetch("/api/settings");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = (await res.json()) as { settings: { lineup?: { beyId: string; special: string }[] } };
-    if (data.settings.lineup?.length) myLineup.value = data.settings.lineup;
+    const data = (await res.json()) as {
+      settings: {
+        lineup?: { beyId: string; special: string }[];
+        launchMode?: string;
+        sfx?: boolean;
+        replaySpeed?: number;
+      };
+    };
+    const s = data.settings;
+    if (s.lineup?.length) myLineup.value = s.lineup;
+    if (s.launchMode === "flick" || s.launchMode === "sling") bt.launchMode.value = s.launchMode;
+    if (typeof s.sfx === "boolean") sfxEnabled.value = s.sfx;
+    if (typeof s.replaySpeed === "number" && [1, 2, 3].includes(s.replaySpeed)) bt.speed.value = s.replaySpeed;
   } catch {
     if (attempt < 5) lineupRetry = setTimeout(() => loadMyLineup(attempt + 1), 1000 * 2 ** attempt);
   }
@@ -72,13 +86,47 @@ onMounted(() => {
   online.connect();
   void loadServerConfig();
   void loadMyLineup();
+  window.addEventListener("beforeunload", onBeforeUnload);
 });
 onBeforeUnmount(() => {
   clearTimeout(configRetry);
   clearTimeout(lineupRetry);
   clearTimeout(spBannerTimer);
   clearTimeout(tapArmTimer);
+  window.removeEventListener("beforeunload", onBeforeUnload);
   online.dispose();
+});
+
+/* ---------- 對戰中離開警告 ----------
+   進行中（連線正常 + 比賽未結束 + aiming/review）才攔；waiting / finished /
+   滿房 / 被取代 / 斷線都放行。「離開房間」角落鍵是 RouterLink → 同樣走 route 守衛。 */
+const battleActive = computed(
+  () =>
+    online.connected.value &&
+    !online.roomFull.value &&
+    !online.superseded.value &&
+    !online.roomClosed.value &&
+    !online.lastOutcome.value?.matchOver &&
+    (snap.value?.phase === "aiming" || snap.value?.phase === "review"),
+);
+function onBeforeUnload(e: BeforeUnloadEvent): void {
+  if (!battleActive.value) return;
+  e.preventDefault();
+  e.returnValue = ""; // 標準寫法：觸發瀏覽器原生「確定要離開？」對話框
+}
+onBeforeRouteLeave(() => {
+  if (battleActive.value && !window.confirm("對戰仍在進行中，確定要離開嗎？")) return false;
+  return true;
+});
+
+/* ---------- 房主關閉房間（waiting 限定；DO 端也會驗 A 側 + waiting） ---------- */
+function onCloseRoom(): void {
+  if (!window.confirm("確定要關閉這個房間嗎？")) return;
+  online.closeRoom();
+}
+// DO 清房後以 4002 關閉連線 → 回大廳（關房者與其他在房分頁都適用）
+watch(online.roomClosed, (v) => {
+  if (v) router.push("/");
 });
 
 /* ---------- 顯示輔助 ---------- */
@@ -394,6 +442,9 @@ function onSpecialChange() {
             <span>ROOM CODE</span>
           </div>
           <button class="f-btn f-btn--ghost" @click="copyCode"><BbIcon name="copy" :size="15" />複製連結</button>
+          <button v-if="mySide === 'A'" class="f-btn f-btn--ghost" @click="onCloseRoom">
+            <BbIcon name="x" :size="15" />關閉房間
+          </button>
           <div class="load-bars"><i></i><i></i><i></i><i></i></div>
         </div>
         <div v-else-if="isAiming && online.myLaunched.value && phase !== 'playing'" class="m-cover thin">
@@ -695,10 +746,11 @@ function onSpecialChange() {
   bottom: 1px;
   left: 1px;
 }
-/* 傷害殘影：白熱層同寬但延遲追上 → 掉血時即時層先掉、lag 慢半拍 */
+/* 傷害殘影：lag 層同寬但延遲追上 → 掉血時即時層先掉、lag 慢半拍。
+   配色用飽和紅（與熔岩橘黃的即時層明顯區隔）：連續撞擊的掉血塊一眼看清 */
 .meter .lag {
-  background: linear-gradient(180deg, #fffaf0, #ffd9a0 60%, #f8b46a);
-  box-shadow: 0 0 10px rgba(255, 243, 214, 0.55);
+  background: linear-gradient(180deg, #ff5a66, #ff2038 55%, #c70f24);
+  box-shadow: 0 0 10px rgba(255, 32, 56, 0.7);
   transition: width 0.5s cubic-bezier(0.25, 0.75, 0.3, 1) 0.35s;
 }
 .meter.hp .fill {

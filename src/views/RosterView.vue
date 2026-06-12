@@ -1,12 +1,16 @@
 <script setup lang="ts">
-// 陀螺庫（/roster）：上半＝我的出賽陣容 3 格、下半＝全名冊卡片清單（六維雷達）。
+// 陀螺庫（/roster）：上半＝我的出賽陣容 3 格（縮圖 + 必殺技），點格子開 BeyPicker 抽屜
+// 選擇/替換；下半＝全名冊卡片牆（瀏覽用），點卡片也開 BeyPicker 預選該顆。
 // lineup 持久化在 user_settings（PUT 全量 settings——先 GET 留存其他欄位再合併送出，
 // 否則 worker 端 sanitize 會把缺欄重設、洗掉其他設定）。
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { BEYBLADES, beyFullName, getBey, type BeyDef } from "../game/beyblades";
-import { STAT_PRESETS, PRESET_LABELS } from "../physics/presets";
+import { BEYBLADES, getBey, beyFullName } from "../game/beyblades";
+import { PRESET_LABELS } from "../physics/presets";
+import { SPECIAL_DESCS, SPECIAL_ORDER, getSpecialDesc } from "../game/specialDesc";
 import BbIcon from "../components/ui/BbIcon.vue";
 import RadarHex from "../components/ui/RadarHex.vue";
+// 色票/雷達正規化共用 BeyPicker 的 named exports（抽屜內外同一份，數值不飄移）
+import BeyPicker, { TYPE_BADGE, TYPE_COLOR, DIM_LABELS, radarValues } from "../components/BeyPicker.vue";
 
 interface LineupEntry {
   beyId: string;
@@ -25,54 +29,8 @@ interface UserSettings {
   lineup: LineupEntry[];
 }
 
-const SPECIAL_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "（無）" },
-  { value: "rush", label: "衝刺突進" },
-  { value: "blast", label: "衝擊" },
-  { value: "dash", label: "高速移動" },
-  { value: "vortex", label: "旋渦" },
-  { value: "clone", label: "分身" },
-];
-
-const TYPE_BADGE: Record<BeyDef["type"], string> = {
-  attack: "f-badge--red",
-  defense: "f-badge--blue",
-  stamina: "f-badge--ok",
-  balance: "f-badge--amber",
-};
-// 雷達多邊形隊色（forge tokens 同色票）
-const TYPE_COLOR: Record<BeyDef["type"], string> = {
-  attack: "#e8442e",
-  defense: "#2e9fe8",
-  stamina: "#57d96b",
-  balance: "#ffb31f",
-};
-
-/* ---- 六維雷達正規化 ----
- * 前四維 raw = STAT_PRESETS[type] × mods（個體差後實際值）、後二維 raw = crit / specialPower；
- * 每維各自對全名冊取 min~max 線性正規化 t = (raw - min) / (max - min)，
- * 再壓到 0.1 + 0.9t（地板 0.1：名冊最弱的維度仍可見、不縮成中心點）。
- */
-const DIMS = ["attack", "defense", "stamina", "weight", "crit", "specialPower"] as const;
-const DIM_LABELS = ["攻擊", "防禦", "續航", "重量", "會心", "必殺"];
-
-function rawDim(bey: BeyDef, dim: (typeof DIMS)[number]): number {
-  if (dim === "crit") return bey.crit;
-  if (dim === "specialPower") return bey.specialPower;
-  return STAT_PRESETS[bey.type][dim] * (bey.mods[dim] ?? 1);
-}
-// 名冊固定 → 各維 min/max 建構時算一次
-const RANGES = DIMS.map((dim) => {
-  const vals = BEYBLADES.map((b) => rawDim(b, dim));
-  return { min: Math.min(...vals), max: Math.max(...vals) };
-});
-function radarValues(bey: BeyDef): number[] {
-  return DIMS.map((dim, i) => {
-    const { min, max } = RANGES[i];
-    const t = max > min ? (rawDim(bey, dim) - min) / (max - min) : 0.5;
-    return 0.1 + 0.9 * t;
-  });
-}
+// 必殺技 select 選項：順序/文案統一吃 specialDesc（描述小字同源）
+const SPECIAL_OPTIONS = SPECIAL_ORDER.map((k) => ({ value: k, label: SPECIAL_DESCS[k].name }));
 
 /* ---- 載入 / 儲存 ---- */
 const base = ref<UserSettings | null>(null); // GET 留存的全量設定（lineup 以外欄位原樣回送）
@@ -102,22 +60,44 @@ onMounted(async () => {
   }
 });
 
-/* ---- 陣容編輯：點名冊卡片加入 / 已在陣容則移除 ---- */
+/* ---- 陣容編輯：一律經 BeyPicker 抽屜選擇/替換；slot-x 直接移除 ---- */
 function inLineup(beyId: string): boolean {
   return lineup.some((e) => e.beyId === beyId);
 }
-function toggleBey(beyId: string) {
+function removeAt(i: number) {
+  lineup.splice(i, 1);
+  notice.value = "";
+}
+
+/* ---- BeyPicker 抽屜狀態 ---- */
+const pickerOpen = ref(false);
+/** 目標陣容格（null＝陣容已滿且從卡片牆點了未出賽顆——只能瀏覽） */
+const pickerSlot = ref<number | null>(null);
+const pickerInitial = ref<string | undefined>(undefined);
+const lineupIds = computed(() => lineup.map((e) => e.beyId));
+
+/** 點陣容格（空格/已佔格皆可）：空格夾到 lineup 尾端（lineup 是 dense 陣列） */
+function openSlotPicker(i: number) {
+  const idx = Math.min(i, lineup.length);
+  pickerSlot.value = idx;
+  pickerInitial.value = lineup[idx]?.beyId;
+  pickerOpen.value = true;
+}
+/** 點名冊卡片：已出賽 → 開該格；未出賽 → 第一個空格（已滿則 null＝只能瀏覽） */
+function openCardPicker(beyId: string) {
   const idx = lineup.findIndex((e) => e.beyId === beyId);
-  if (idx >= 0) {
-    lineup.splice(idx, 1);
-    notice.value = "";
-    return;
-  }
-  if (lineup.length >= 3) {
-    notice.value = "陣容已滿（3 格），請先移除一顆再加入";
-    return;
-  }
-  lineup.push({ beyId, special: "" });
+  pickerSlot.value = idx >= 0 ? idx : lineup.length < 3 ? lineup.length : null;
+  pickerInitial.value = beyId;
+  pickerOpen.value = true;
+}
+/** 抽屜確認：替換既有格（保留該格已選必殺技）或新增到尾端 */
+function onPick(beyId: string) {
+  const i = pickerSlot.value;
+  if (i === null) return;
+  const entry = lineup[i];
+  if (entry) entry.beyId = beyId;
+  else lineup.push({ beyId, special: "" });
+  pickerOpen.value = false;
   notice.value = "";
 }
 
@@ -163,27 +143,38 @@ async function save() {
       <template v-else>
         <ol class="slots">
           <li v-for="(slot, i) in slotRows" :key="i" class="slot" :class="{ empty: !slot }">
-            <span class="order">{{ i + 1 }}</span>
-            <template v-if="slot">
-              <div class="slot-main">
-                <div class="slot-name">
-                  <b>{{ slot.bey.name }}</b>
-                  <span class="f-badge" :class="TYPE_BADGE[slot.bey.type]">{{ PRESET_LABELS[slot.bey.type] }}</span>
-                </div>
-                <label class="slot-special">
-                  <span class="sp-label">必殺技</span>
-                  <span class="f-select">
-                    <select v-model="slot.entry.special">
-                      <option v-for="o in SPECIAL_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-                    </select>
+            <div class="slot-top">
+              <span class="order">{{ i + 1 }}</span>
+              <template v-if="slot">
+                <button class="slot-hit" title="更換此格陀螺" @click="openSlotPicker(i)">
+                  <span class="slot-thumb">
+                    <img :src="`/beyblades/${slot.bey.type}-64.webp`" alt="" width="40" height="40" />
                   </span>
-                </label>
-              </div>
-              <button class="slot-x" title="移出陣容" @click="toggleBey(slot.entry.beyId)">
-                <BbIcon name="x" :size="14" />
+                  <span class="slot-name">
+                    <b>{{ slot.bey.name }}</b>
+                    <span class="f-badge" :class="TYPE_BADGE[slot.bey.type]">{{ PRESET_LABELS[slot.bey.type] }}</span>
+                  </span>
+                  <BbIcon name="arrow-repeat" :size="13" class="swap-ic" />
+                </button>
+                <button class="slot-x" title="移出陣容" @click="removeAt(i)">
+                  <BbIcon name="x" :size="14" />
+                </button>
+              </template>
+              <button v-else class="slot-add" @click="openSlotPicker(i)">
+                <BbIcon name="plus" :size="14" />選擇陀螺加入
               </button>
-            </template>
-            <span v-else class="slot-empty-txt">點選下方陀螺加入</span>
+            </div>
+            <div v-if="slot" class="slot-sp">
+              <label class="slot-special">
+                <span class="sp-label">必殺技</span>
+                <span class="f-select">
+                  <select v-model="slot.entry.special">
+                    <option v-for="o in SPECIAL_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                </span>
+              </label>
+              <p class="sp-desc">{{ getSpecialDesc(slot.entry.special).desc }}</p>
+            </div>
           </li>
         </ol>
         <p class="hint">
@@ -209,7 +200,7 @@ async function save() {
           :key="bey.id"
           class="bey-card"
           :class="{ picked: inLineup(bey.id) }"
-          @click="toggleBey(bey.id)"
+          @click="openCardPicker(bey.id)"
         >
           <RadarHex :values="radarValues(bey)" :labels="DIM_LABELS" :color="TYPE_COLOR[bey.type]" />
           <div class="bey-name">{{ beyFullName(bey) }}</div>
@@ -221,8 +212,18 @@ async function save() {
           </div>
         </button>
       </div>
-      <p class="hint">點卡片加入出賽陣容；再點一次移除。六維為全名冊相對值（會心＝爆擊機率、必殺＝必殺技強度）。</p>
+      <p class="hint">點卡片開啟選擇器加入或替換陣容。六維為全名冊相對值（會心＝爆擊機率、必殺＝必殺技強度）。</p>
     </section>
+
+    <!-- 陀螺選擇器（off-canvas 底部抽屜） -->
+    <BeyPicker
+      :open="pickerOpen"
+      :slot-index="pickerSlot"
+      :lineup-ids="lineupIds"
+      :initial-bey-id="pickerInitial"
+      @close="pickerOpen = false"
+      @pick="onPick"
+    />
   </div>
 </template>
 
@@ -270,8 +271,8 @@ async function save() {
 }
 .slot {
   display: flex;
-  align-items: center;
-  gap: 11px;
+  flex-direction: column;
+  gap: 7px;
   padding: 10px 11px;
   min-height: 58px;
   background: linear-gradient(180deg, #171a21, #11141a);
@@ -280,6 +281,12 @@ async function save() {
 }
 .slot.empty {
   box-shadow: inset 0 0 0 1px rgba(170, 180, 196, 0.14);
+}
+.slot-top {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 40px;
 }
 /* 出賽順序徽章 */
 .order {
@@ -299,13 +306,35 @@ async function save() {
 .slot.empty .order {
   color: var(--muted);
 }
-.slot-main {
+/* 點擊熱區：縮圖 + 名字（開 BeyPicker 替換此格） */
+.slot-hit {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.slot-thumb {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 36%, #2c323d, #12151b 76%);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  box-shadow: inset 0 0 0 1px rgba(170, 180, 196, 0.2);
+}
+.slot-thumb img {
+  display: block;
+  width: 34px;
+  height: 34px;
 }
 .slot-name {
   display: flex;
@@ -322,8 +351,43 @@ async function save() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.slot-special {
+/* 換裝箭頭：hover 熱區時亮起提示可替換 */
+.swap-ic {
   flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  opacity: 0.55;
+  transition: opacity 0.15s, color 0.15s;
+}
+.slot-hit:hover .swap-ic {
+  color: var(--accent);
+  opacity: 1;
+}
+/* 空格：整列幽靈鍵開選擇器 */
+.slot-add {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  background: none;
+  transition: color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.slot-add:hover {
+  color: var(--accent);
+}
+/* 必殺技列 + 描述小字（縮排對齊名字欄） */
+.slot-sp {
+  margin-left: 37px;
+}
+.slot-special {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -339,6 +403,13 @@ async function save() {
   padding-top: 4px;
   padding-bottom: 4px;
   font-size: 12.5px;
+}
+.sp-desc {
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+  letter-spacing: 0.03em;
+  color: var(--muted);
 }
 /* 移出鈕（小型幽靈鍵） */
 .slot-x {
@@ -356,11 +427,6 @@ async function save() {
 }
 .slot-x:hover {
   color: var(--red);
-}
-.slot-empty-txt {
-  color: var(--muted);
-  font-size: 12.5px;
-  letter-spacing: 0.08em;
 }
 /* ---- 名冊卡片 ---- */
 .bey-grid {
@@ -447,12 +513,10 @@ async function save() {
   font-weight: 700;
   letter-spacing: 0.06em;
 }
-/* 超窄機（<380px）：slot 內必殺技換行排 */
+/* 超窄機（<380px）：必殺技列不縮排（爭取描述寬度） */
 @media (max-width: 379.98px) {
-  .slot-main {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
+  .slot-sp {
+    margin-left: 0;
   }
 }
 </style>

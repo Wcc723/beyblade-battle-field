@@ -85,9 +85,9 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 
 ## 陀螺名冊（roster）
 
-`src/game/beyblades.ts`（零 Env/DOM，worker 與前端共用）＝固定角色名冊：10 顆 `BeyDef`（id/name/type/mods/crit/specialPower），顯示名 `beyFullName()`＝「赤霄焚輪-攻擊型」。**id+name 有凍結鎖**（test/beyblades.test.ts checksum 44f8b176——數值可調、名字永固，動名單要原位替換+更新 checksum）。個體差設計：mods 0.92~1.08 乘在類型基礎上（admin 調類型基礎仍全面生效）、crit 0.03~0.08、specialPower 0.9~1.2、無全維度優勢顆。
+`src/game/beyblades.ts`（零 Env/DOM，worker 與前端共用）＝固定角色名冊：10 顆 `BeyDef`（id/name/type/mods/crit/specialPower），顯示名 `beyFullName()`＝「緋空斬月-攻擊型」（命名風格＝日式/美式中二，使用者拍板）。**id+name 有凍結鎖**（test/beyblades.test.ts checksum 132f762a——數值可調、名字要改需原位替換+更新 checksum；id 永不可動＝DB lineup 引用）。個體差設計：mods 0.92~1.08 乘在類型基礎上（admin 調類型基礎仍全面生效）、crit 0.03~0.08、specialPower 0.9~1.2、無全維度優勢顆。**後台個體覆寫**：global_config key `beys`（`{beyId: {mods?, crit?, specialPower?}}`，api.ts `applyBeyOverrides` 夾制合併，DO runRound 套用）；後台拆兩頁＝/admin/beyblade（類型基礎+10 顆個體）與 /admin/special（必殺數值+分招緩衝）。
 
-- **會心**：碰撞時攻擊者 `crit`（預設 0.05）機率觸發，50/50 出「傷害 ×2」或「擊退 ×2（夾制後補推）」；`CollisionEvent.critA/critB`（記在受擊側）；**每碰撞固定消耗 4 次 rng**（沒中也消耗→調 crit 不位移 rng 流）。前端金黃數字+放射閃光。
+- **會心**：碰撞時攻擊者 `crit`（預設 0.05）機率觸發，50/50 出「傷害 ×1.5（CRIT_DMG_MUL）」或「擊退 ×2（夾制後補推）」；`CollisionEvent.critA/critB`（記在受擊側）；**每碰撞固定消耗 4 次 rng**（沒中也消耗→調 crit 不位移 rng 流）。前端金黃數字+放射閃光。
 - **specialPower**：必殺冷卻 ×(2−s)、rush/blast/clone 傷害 ×s；dash 回血/vortex 不吃 s。
 - **lineup**：玩家選 3 顆出賽（`user_settings.lineup` JSON，migration 0005；空→`DEFAULT_LINEUP`）；選秀介面 `/roster`（RosterView+RadarHex 六維雷達：攻/防/續航/重量/會心/必殺）。線上協定 `Loadout={beyId,spinDir,special}`，DO 以 `getBey→resolveBeyStats` 組裝防竄改；**按順序出賽**＝round N 預設 lineup[(N-1)%len]、手動切換僅當回合有效。
 - **場地隨機池**：arena config `enabledIds`（後台勾選、缺→[activeId]）；DO 每場 match 開打時抽一座存 `matchArena`、整場固定、rematch 重抽。
@@ -101,18 +101,18 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 - **dash（高速移動）**：低轉速觸發加速 + 回轉，**並回血 10% maxHp**（`dashHealFrac`，事件帶 `heal` 欄位供前端彈綠字）。
 - **vortex（旋渦）**／**clone（分身）**：吸附扣轉／分身衝撞（次數多、單發傷害低）。
 
-所有數值集中在 `engine.ts` 的 `DEFAULT_SPECIAL`，每招獨立觸發機率；**`graceTime`（預設 3s）＝開場緩衝，所有必殺在 t < graceTime 一律不觸發**（resolveCollisions 的 blast 與 applySpecials 各有一道閘門）。
+所有數值集中在 `engine.ts` 的 `DEFAULT_SPECIAL`，每招獨立觸發機率；**開場緩衝為分招欄位 `rushGraceTime/blastGraceTime/dashGraceTime/vortexGraceTime/cloneGraceTime`（各預設 3s）**，t < grace 該招不觸發（resolveCollisions 的 blast 與 applySpecials 各一道閘門）；舊 `graceTime` 為 legacy 可選 fallback。漩渦＝重抽旋磨停轉流（drain 300/dur 4s/pull 380）+ **發動中等效重量 ×2（VORTEX_MASS_MUL：受擊擊退減半、出界門檻 ×2）**——強拉力會餵對手 AGGRESSOR split，勝利路徑靠磨不靠拉殺。
 
 ## 平衡（很重要）
 
 **平衡是「場地 × 屬性」共同決定的**——同一組陀螺換個場地勝率天差地遠。靠時間/停轉決勝 → 續航為王；靠碰撞/出界決勝 → 攻防/重量才有用。**動到 `STAT_PRESETS`、`DEFAULT_ARENA`、`HP_BASE`、`DEFAULT_SPECIAL` 後一定要 `npm run balance` 驗證。** 工具在 `test/balance.bench.ts`（用 `vitest.balance.config.ts`，不混進一般 `npm test`）。
 
-現行校準（2026-06 第三輪定案，雙 ko=平手規則下）：勝負原因 **ko ~54% / spin-out ~29% / ring-out ~12% / draw ~4.5%**（draw 幾乎全是雙 KO、集中在 attack 鏡像對局 ~20%——單發傷害佔血池 ~84% 是結構底線）；四類型勝率 48.8 / 49.3 / 50.8 / 51.1；猜拳三角方向保留但刻意收淺（54~56）——**三角越陡＝擊殺時間越收斂＝同步雙 KO 越多**，是結構性權衡。注意事項：
+現行校準（2026-06 第四輪定案＝時長重校）：**平均戰局 26s／中位 31s（目標 20~30s、hpBase 1150 防開場秒殺）**；勝負原因 **ko ~57% / spin-out ~23% / ring-out ~15.5% / draw ~4.7%**；四類型勝率 48.9~51.7（帶寬 40~60）；猜拳三角 53~57。必殺裝備勝率 rush 64 / clone 64 / dash 62 / vortex 62 / blast 51（全 >50）。注意事項：
 
 - 碰撞傷害 **±10% seeded 浮動**（dmgA/dmgB 獨立擲骰）+ **速度主導傷害分配**（`AGGRESSOR_DMG_SPLIT`：衝得快的進攻方少吃、被撞方多吃，impact 90~220 線性淡入）——兩者合力把雙 KO 從 25.9% 壓到 4.5%。
 - **`defense.attack` 是刀口參數**：atk-def 對局對它極度敏感（±0.03 可大幅擺動勝率），動它必重跑 balance。
 - 各勝負原因比例在不同 seed 有 ±1.5pp 取樣噪音，勿對單一 seed 過度擬合。
-- **D1 `global_config` 會蓋過程式碼預設**：重校後要同步線上值（migration 0004 清除舊 blob 回落新預設；之後再重校記得比照處理）。`defaultConfigValue` 的 arena `activeId` 預設必須是 `builtin-xtreme`（清 blob 後若回落圓形場＝正式站默默換場）。
+- **D1 `global_config` 會蓋過程式碼預設**：重校後要同步線上值（migration 0004/0006 清除舊 blob 回落新預設；之後再重校記得比照處理——beys 個體覆寫為差異值可保留）。`defaultConfigValue` 的 arena `activeId` 預設必須是 `builtin-xtreme`（清 blob 後若回落圓形場＝正式站默默換場）。
 
 場地（去 IP）：顯示名「熔核競技場 FORGE CORE STADIUM」（程式識別子 `XTREME_STADIUM`/`builtin-xtreme` 為相容性保留）；**「Beyblade」「Xtreme」不得出現在任何使用者可見字串**。第三場地「弧壁競技場 ARC WALL STADIUM」（`builtin-arcwall`）＝超橢圓 r(θ)（`ArenaConfig.superellipse.power`，`arena.ts` 的 `boundaryRadiusAt`/`sampleBoundary` 引擎與 ArenaSvg 共用 → 畫面物理同源）+ 四對角 rim pocket 出界。
 
@@ -121,9 +121,9 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 - 設計系統在 `src/styles/forge.css`：tokens 沿用舊變數名（`--accent` 琥珀 #ffb31f、`--lava`、`--red` #e8442e、`--blue` #2e9fe8、`--ok`）+ 共用 class（`.plate` 切角金屬面板／`.f-btn` 機台鍵／`.f-input`／`.f-select`／`.f-badge`／`.seg`／`.hazard`／`.f-label`）。字型 Big Shoulders Display + Noto Sans TC（index.html 載入）。
 - **全站渲染字串零 emoji**；圖示一律 `src/components/ui/BbIcon.vue`（30 個 inline SVG，name+size props）——新增 UI 請沿用，缺圖示就加進 BbIcon 的 ICONS map，不要回頭用 emoji。
 - **`.plate`/`.f-btn` 雷**：clip-path 會吃掉 box-shadow → 外陰影/鍵帽厚度一律走 `filter: drop-shadow()`。
-- 行動版：底部 Tab Bar 只有大廳/個人設定（room/test 路由隱藏）；測試頁與後台入口**僅 admin 渲染**。
-- 中二名稱系統 `src/game/names.ts`（零 Env，worker 與前端共用）：`autoNickname(uid)` 自動暱稱（API 讀設定時補上並持久化）、`beybladeName(uid, type)` 陀螺名（穩定 hash、不存 DB、兩端一致）。**名池已凍結**（test/names.test.ts 的 checksum 鎖）：hash 取模選名 → 插入/刪除/重排都會讓全服名字洗牌，只准原位替換並更新 checksum。
-- 音效 `src/audio/sfx.ts`＝「街機誇張」純合成引擎（sfx-lab 試聽室 C 案）：bitcrush + pump 壓縮 + 完整響度鏈；**試聽室 `public/sfx-lab.html` 保留**——調音色先去那邊 A/B 定案再搬參數回 sfx.ts。R2 取樣管線（`/api/sfx/:key`、bucket `beyblade-sfx`、`scripts/upload-sfx.sh`）保留但目前未使用（取樣路線被使用者否決，留作未來混血選項）。
+- 行動版：底部 Tab Bar＝大廳/陀螺/個人設定（room/test 路由隱藏）；**room 路由行動版連 header 都隱藏**（沉浸）；登出鍵在個人設定頁（header 不放、防誤觸）；對戰中離開有 confirm+beforeunload 攔截。測試頁與後台入口**僅 admin 渲染**。
+- 中二名稱系統 `src/game/names.ts`（零 Env，worker 與前端共用）：`autoNickname(uid)` 自動暱稱（API 讀設定時補上並持久化；風格＝日式/美式中二，暱稱清空儲存可重抽）。**名池已凍結**（test/names.test.ts checksum 12b004d0）：hash 取模選名 → 插入/刪除/重排都會讓全服名字洗牌，只准原位替換並更新 checksum。
+- 音效 `src/audio/sfx.ts`＝「街機誇張」純合成引擎（sfx-lab 試聽室 C 案）：bitcrush + pump 壓縮 + 完整響度鏈；**試聽室 `public/sfx-lab.html` 與選樣室 `public/sfx-pick.html` 保留**——選樣室逐槽試聽（現役/Lab/`public/sfx-test/` 資料夾音檔），使用者選擇存 localStorage `bb-sfx-picks`（開發套用音效前先讀這份）。R2 取樣管線（`/api/sfx/:key`、bucket `beyblade-sfx`、`scripts/upload-sfx.sh`）保留但目前未使用（取樣路線被使用者否決，留作未來混血選項）。
 - 場地震動是**容器級**（useBattle 的 `shakeEl` ref 綁場地容器 div，直接 DOM transform、振幅以顯示像素標定）——別再用 ctx.translate 只震 canvas 層（SVG 底圖不會跟著動）。
 
 ## 容易踩的雷

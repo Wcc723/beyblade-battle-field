@@ -98,8 +98,9 @@ describe("傷害浮動 ±10% (damage variance)", () => {
   });
 });
 
-describe("必殺技開場緩衝 (graceTime)", () => {
+describe("必殺技開場緩衝 (graceTime：legacy 統一欄位 fallback)", () => {
   // A=blast（resolveCollisions 內的閘門）、B=dash（applySpecials 內的閘門），必中設定 + 小場反覆對撞。
+  // 覆寫只帶舊 graceTime（無分招欄位）→ legacy fallback 套用到所有招式（舊存檔/舊測試行為不變）。
   const GRACE = 1.0;
   const run = (graceTime: number) =>
     simulate(
@@ -131,6 +132,44 @@ describe("必殺技開場緩衝 (graceTime)", () => {
     expect(r.specialEvents.some((e) => e.kind === "blast")).toBe(true); // 緩衝後照常觸發
     expect(r.specialEvents.some((e) => e.kind === "dash")).toBe(true);
     for (const e of r.specialEvents) expect(e.t).toBeGreaterThanOrEqual(GRACE); // 緩衝內零事件
+  });
+});
+
+describe("必殺技開場緩衝（分招 *GraceTime）", () => {
+  // A=rush（applySpecials 閘門）、B=blast（resolveCollisions 閘門），必中設定 + 小場反覆對撞。
+  const run = (special: NonNullable<Parameters<typeof simulate>[1]["special"]>) =>
+    simulate(
+      [
+        body({ id: "A", position: { x: -25, y: 0 }, velocity: { x: 200, y: 60 }, spin: 5000, radius: 20, special: "rush" }),
+        body({ id: "B", position: { x: 25, y: 0 }, velocity: { x: -200, y: -60 }, spin: 5000, radius: 20, special: "blast" }),
+      ],
+      {
+        dt: 1 / 60,
+        maxTime: 10, // blast 閘門 5s 之後還要留夠長的觀察窗（rush 持續衝撞 → 後段仍有碰撞）
+        arena: neutralArena({ radius: 60, centerPull: 150, swirl: 15, ringOutSpeed: 1e9, friction: 0.3, spinDecayBase: 4 }),
+        seed: 4,
+        special: {
+          rushChance: 1, rushRange: 200, rushSpeed: 140, rushDamage: 0, rushCooldown: 0.5, rushMaxUses: 99,
+          blastChance: 1, blastImpactMin: 5, blastPush: 0, blastDamage: 0, blastCooldown: 0.05, blastMaxUses: 99,
+          ...special,
+        },
+      },
+    );
+
+  it("rush grace 0 + blast grace 5 → 開場只出 rush；blast 全部 ≥ 5s", () => {
+    const r = run({ rushGraceTime: 0, blastGraceTime: 5 });
+    const rush = r.specialEvents.filter((e) => e.kind === "rush");
+    const blast = r.specialEvents.filter((e) => e.kind === "blast");
+    expect(rush.some((e) => e.t < 1)).toBe(true); // rush 開場立即可發
+    expect(blast.length).toBeGreaterThan(0); // 緩衝過後 blast 照常觸發（閘門會開）
+    for (const e of blast) expect(e.t).toBeGreaterThanOrEqual(5); // 5 秒內零 blast
+    expect(r.specialEvents.filter((e) => e.t < 5).every((e) => e.kind === "rush")).toBe(true); // 開場只出 rush
+  });
+
+  it("分招欄位優先於 legacy graceTime：graceTime=5 + rushGraceTime=0 → rush 開場照發、blast 吃 legacy 5s", () => {
+    const r = run({ graceTime: 5, rushGraceTime: 0 });
+    expect(r.specialEvents.some((e) => e.kind === "rush" && e.t < 1)).toBe(true); // 明示設定者優先
+    for (const e of r.specialEvents.filter((e) => e.kind === "blast")) expect(e.t).toBeGreaterThanOrEqual(5); // 未明示 → legacy fallback
   });
 });
 

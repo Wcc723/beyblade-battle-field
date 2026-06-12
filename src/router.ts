@@ -45,6 +45,12 @@ export const router = createRouter({
       component: () => import("./views/BeybladeAdminView.vue"),
       meta: { requiresAuth: true, requiresAdmin: true },
     },
+    {
+      path: "/admin/special",
+      name: "admin-special",
+      component: () => import("./views/SpecialAdminView.vue"),
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
     { path: "/login", name: "login", component: () => import("./views/LoginView.vue") },
     { path: "/test/battle", name: "test-battle", component: () => import("./components/BattleViz.vue") },
     { path: "/test/mobile", name: "test-mobile", component: () => import("./components/MobileBattle.vue") },

@@ -25,8 +25,13 @@ import { rimAt, softWallRadiusAt, softWallNormalAt, softWallAccelAt, boundaryRad
 
 /** 必殺技數值（集中可調，可被 SimConfig.special 覆寫） */
 export const DEFAULT_SPECIAL: SpecialConfig = {
-  // 開場緩衝：前 3 秒所有必殺技不得觸發（讓開場對撞先定調，必殺不搶戲）
-  graceTime: 3.0,
+  // 開場緩衝（分招）：t < 該招緩衝一律不得觸發（讓開場對撞先定調，必殺不搶戲）。
+  // 舊統一欄位 graceTime 保留為 legacy fallback：覆寫物件帶 graceTime 時，未明示設定的招式用它。
+  rushGraceTime: 3.0,
+  blastGraceTime: 3.0,
+  dashGraceTime: 3.0,
+  vortexGraceTime: 3.0,
+  cloneGraceTime: 3.0,
   // rush 突進：降機率/次數 + 大砍衝撞速度；傷害調高 → 裝了要明顯比不裝強
   rushChance: 0.14,
   rushRange: 110,
@@ -38,7 +43,7 @@ export const DEFAULT_SPECIAL: SpecialConfig = {
   blastChance: 0.1,
   blastImpactMin: 90,
   blastPush: 70,
-  blastDamage: 85,
+  blastDamage: 105,
   blastCooldown: 5.0,
   blastMaxUses: 2,
 
@@ -53,14 +58,17 @@ export const DEFAULT_SPECIAL: SpecialConfig = {
   dashMaxSpeedMul: 0.45,
   dashHealFrac: 0.1,
 
-  // vortex 旋渦：拉力溫和 + 抽旋壓到 ~45/s（靠拉進來磨而非抽乾）；持續拉長 +40%
-  vortexChance: 0.55,
-  vortexCooldown: 8,
+  // vortex 旋渦（2026-06 buff，裝備勝率 ~36% → ~62%）：拉力大增（240→380）+ 持續 4s + 重抽旋
+  // （300/s——抽旋是主要勝利路徑：把對手拉在身邊磨到停轉；硬拉對撞反而餵對手 AGGRESSOR 加成，故不靠撞）；
+  // 發動期間自身「等效重量上升」（受擊擊退減半 + 出界門檻翻倍，見 VORTEX_MASS_MUL）→
+  // 把對手硬拉進來對撞也不會把自己彈飛自爆。
+  vortexChance: 0.7,
+  vortexCooldown: 7,
   vortexMaxUses: 2,
-  vortexSpinDrain: 45,
-  vortexRange: 220,
-  vortexPull: 240,
-  vortexDuration: 2.2,
+  vortexSpinDrain: 300,
+  vortexRange: 250,
+  vortexPull: 380,
+  vortexDuration: 4.0,
 
   // clone 分身：高機率 + 可發兩次 + 單次低傷（總期望傷害略升）
   cloneChance: 0.35,
@@ -74,10 +82,18 @@ export const DEFAULT_SPECIAL: SpecialConfig = {
 };
 
 /** 血量（耐久條）基準預設：maxHp = hpBase × 重量 */
-export const HP_BASE = 1100;
+export const HP_BASE = 1150;
 
-/** 會心機率預設（stats.crit 未設時用）。效果：對方該次傷害 ×2 或 擊退 ×2（50/50 擲骰） */
+/** 會心機率預設（stats.crit 未設時用）。效果：對方該次傷害 ×1.5 或 擊退 ×2（50/50 擲骰） */
 export const DEFAULT_CRIT = 0.05;
+/** 會心「傷害型」倍率（"kb" 擊退型維持 ×2 = 夾制後再補一份等量推力） */
+export const CRIT_DMG_MUL = 1.5;
+/**
+ * 旋渦發動期間的「等效重量」倍率：受擊擊退（含會心 kb / spinKnockback / blast 彈開）×(1/本值)、
+ * 出界門檻 ×本值（圓形 rim 與超橢圓弧壁皆適用）→ 把對手硬拉進來對撞不會自爆出界。
+ * 實作為「夾制之後的縮放 / 門檻調整」，不動能量夾制本身（夾制慣例遵守）。
+ */
+export const VORTEX_MASS_MUL = 2.0;
 /** 必殺強度預設（stats.specialPower 未設時用）：必殺冷卻 ×(2−s)、rush/blast/clone 傷害 ×s */
 export const DEFAULT_SPECIAL_POWER = 1.0;
 export function maxHpFor(stats: BeybladeStats, hpBase: number = HP_BASE): number {
@@ -162,12 +178,12 @@ export const AGGRESSOR_GUARD = 1.0;
  * split 的衝擊力門檻（線性淡入）：impact ≤ MIN 完全對稱（低速擦撞/磨血不受 split 影響，
  * 防禦型的磨血戰術才成立）；impact ≥ FULL 全額 split（致命重擊天然不對稱 → 消同步雙 KO）。
  */
-export const SPLIT_IMPACT_MIN = 90;
-export const SPLIT_IMPACT_FULL = 220;
+export const SPLIT_IMPACT_MIN = 75;
+export const SPLIT_IMPACT_FULL = 185;
 
 /**
  * 傷害用攻防比的「軟膝」壓縮：recv = atk/def ≤ 1 不變；> 1 的部分乘上本係數。
- * 現行預設下只有攻擊型鏡像對局（1.5/0.8 = 1.875）落在 > 1 區——壓低其單發傷害佔血池比例
+ * 現行預設下只有攻擊型鏡像對局（1.78/0.8 = 2.225）落在 > 1 區——壓低其單發傷害佔血池比例
  * （雙 KO 的主要來源），其他對局（recv ≤ 1.0）完全不受影響。只作用於扣血，不影響擊退物理。
  */
 export const DMG_RECV_SOFT = 0.15;
@@ -179,15 +195,15 @@ export const DEFAULT_ARENA: ArenaConfig = {
   centerPull: 90,
   friction: 0.5,
   swirl: 110,
-  spinDecayBase: 56,
+  spinDecayBase: 60,
   restitution: 0.6,
-  collisionSpinLoss: 1.28,
+  collisionSpinLoss: 1.55,
   knockback: 1.8,
   oppSpinBonus: 1.5,
   spinKnockback: 0.14,
   wallBounce: 0.7,
   wallSpinLoss: 0.12,
-  ringOutSpeed: 160,
+  ringOutSpeed: 150,
   gravity: 900,
   jumpPop: 0.15,
   jumpOverHeight: 34,
@@ -332,6 +348,24 @@ function maxUsesFor(special: SpecialKind | "", sc: SpecialConfig): number {
   }
 }
 
+/** 每招的開場緩衝（分招閘門；legacy graceTime 已在 simulate 合併時解析掉）。 */
+function graceTimeFor(special: SpecialKind | "", sc: SpecialConfig): number {
+  switch (special) {
+    case "rush":
+      return sc.rushGraceTime;
+    case "blast":
+      return sc.blastGraceTime;
+    case "dash":
+      return sc.dashGraceTime;
+    case "vortex":
+      return sc.vortexGraceTime;
+    case "clone":
+      return sc.cloneGraceTime;
+    default:
+      return 0;
+  }
+}
+
 /** 隊伍：分身屬於主人那隊（用來判定敵我、避免分身打自己人）。 */
 function teamOf(b: Body): string {
   return b.isClone ? b.cloneOwnerId : b.id;
@@ -404,7 +438,17 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
   const dt = config.dt;
   const sampleEvery = Math.max(1, Math.floor(config.sampleEvery ?? 1));
   const maxSteps = Math.max(1, Math.ceil(config.maxTime / dt));
-  const sc: SpecialConfig = { ...DEFAULT_SPECIAL, ...config.special };
+  const ov = config.special ?? {};
+  const sc: SpecialConfig = { ...DEFAULT_SPECIAL, ...ov };
+  // legacy graceTime fallback：覆寫物件帶舊統一欄位時，所有「未明示設定」的分招緩衝都用它
+  // （舊存檔 / 舊測試 `{ graceTime: 0 }` 行為不變；新分招欄位明示設定者優先）。
+  if (ov.graceTime !== undefined) {
+    if (ov.rushGraceTime === undefined) sc.rushGraceTime = ov.graceTime;
+    if (ov.blastGraceTime === undefined) sc.blastGraceTime = ov.graceTime;
+    if (ov.dashGraceTime === undefined) sc.dashGraceTime = ov.graceTime;
+    if (ov.vortexGraceTime === undefined) sc.vortexGraceTime = ov.graceTime;
+    if (ov.cloneGraceTime === undefined) sc.cloneGraceTime = ov.graceTime;
+  }
 
   const bodies: Body[] = inits.map((b) => ({
     id: b.id,
@@ -468,7 +512,7 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
     t = step * dt;
     integrate(bodies, arena, dt);
     resolveCollisions(bodies, arena, sc, rng, t, specialEvents, collisionEvents);
-    resolveWalls(bodies, arena, step);
+    resolveWalls(bodies, arena, step, t);
     applySpecials(bodies, sc, rng, t, dt, specialEvents);
     checkDeaths(bodies, arena, step);
 
@@ -690,11 +734,16 @@ function resolveCollisions(
       const aRecv = clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4);
       const bRecv = clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4);
 
+      // 旋渦發動期間「等效重量上升」：受擊擊退 ×(1/VORTEX_MASS_MUL)。
+      // 縮減不會被能量夾制放大（夾制只防超彈性），後面的額外推力（會心 kb / spinKnockback / blast）也吃同係數。
+      const aVtxResist = t < a.vortexUntilT ? 1 / VORTEX_MASS_MUL : 1;
+      const bVtxResist = t < b.vortexUntilT ? 1 / VORTEX_MASS_MUL : 1;
+
       // 受擊側各自吃到的擊退速度變化先記下來（會心 "kb" 要在夾制後再補一份等量推力）
-      const aKbX = (jx / a.mass) * aRecv;
-      const aKbY = (jy / a.mass) * aRecv;
-      const bKbX = (jx / b.mass) * bRecv;
-      const bKbY = (jy / b.mass) * bRecv;
+      const aKbX = (jx / a.mass) * aRecv * aVtxResist;
+      const aKbY = (jy / a.mass) * aRecv * aVtxResist;
+      const bKbX = (jx / b.mass) * bRecv * bVtxResist;
+      const bKbY = (jy / b.mass) * bRecv * bVtxResist;
       a.vx -= aKbX;
       a.vy -= aKbY;
       b.vx += bKbX;
@@ -729,17 +778,17 @@ function resolveCollisions(
       let dmgA = dmg * (1 - splitA) * softenRecv(clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4)) * (0.9 + rng() * 0.2);
       let dmgB = dmg * (1 + splitB) * softenRecv(clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4)) * (0.9 + rng() * 0.2);
       // 會心一擊：每次碰撞、每側獨立擲骰（機率 = 攻擊者的 crit），中了再擲 50/50 決定效果——
-      // "dmg"＝受擊側這份傷害 ×2（在 ±10% 浮動與 AGGRESSOR split 之後乘）；"kb"＝受擊側擊退 ×2（夾制後補推，見下）。
+      // "dmg"＝受擊側這份傷害 ×CRIT_DMG_MUL(1.5)（在 ±10% 浮動與 AGGRESSOR split 之後乘）；"kb"＝受擊側擊退 ×2（夾制後補推，見下）。
       // rng 消耗固定每碰撞 4 次、順序固定（先判 A 被打、再判 B 被打；沒中也照樣消耗）→
-      // crit 參數不同不會位移 rng 流，同 seed 的 crit=0 對照組傷害基值逐位元相同（測試靠這點驗恰為 2x）。
+      // crit 參數不同不會位移 rng 流，同 seed 的 crit=0 對照組傷害基值逐位元相同（測試靠這點驗恰為 1.5x）。
       const rollA = rng();
       const effA: "dmg" | "kb" = rng() < 0.5 ? "dmg" : "kb";
       const rollB = rng();
       const effB: "dmg" | "kb" = rng() < 0.5 ? "dmg" : "kb";
       const critA = rollA < b.crit ? effA : undefined; // A 被 B 會心打（事件記在受擊側欄位）
       const critB = rollB < a.crit ? effB : undefined; // B 被 A 會心打
-      if (critA === "dmg") dmgA *= 2;
-      if (critB === "dmg") dmgB *= 2;
+      if (critA === "dmg") dmgA *= CRIT_DMG_MUL;
+      if (critB === "dmg") dmgB *= CRIT_DMG_MUL;
       a.hp -= dmgA;
       b.hp -= dmgB;
 
@@ -783,18 +832,18 @@ function resolveCollisions(
         const maxSpin = DEFAULT_SCALES.maxSpin;
         const aSpinN = Math.max(0, a.spin) / maxSpin; // a 的轉速 → 推 b
         const bSpinN = Math.max(0, b.spin) / maxSpin; // b 的轉速 → 推 a
-        b.vx += nx * impact * spinK * aSpinN;
-        b.vy += ny * impact * spinK * aSpinN;
-        a.vx -= nx * impact * spinK * bSpinN;
-        a.vy -= ny * impact * spinK * bSpinN;
+        b.vx += nx * impact * spinK * aSpinN * bVtxResist;
+        b.vy += ny * impact * spinK * aSpinN * bVtxResist;
+        a.vx -= nx * impact * spinK * bSpinN * aVtxResist;
+        a.vy -= ny * impact * spinK * bSpinN * aVtxResist;
       }
 
-      // 必殺技【衝擊】：裝備者打出夠猛的一擊（impact>門檻）+ 過開場緩衝 + 過冷卻 + 本回合還有次數 → 機率把對手彈開 + 扣血
-      if (impact > sc.blastImpactMin && t >= sc.graceTime) {
-        // a 衝擊 b：把 b 沿法線（遠離 a）方向彈開
+      // 必殺技【衝擊】：裝備者打出夠猛的一擊（impact>門檻）+ 過開場緩衝（分招 blastGraceTime）+ 過冷卻 + 本回合還有次數 → 機率把對手彈開 + 扣血
+      if (impact > sc.blastImpactMin && t >= sc.blastGraceTime) {
+        // a 衝擊 b：把 b 沿法線（遠離 a）方向彈開（b 旋渦發動中 → 彈開吃等效重量縮減）
         if (a.special === "blast" && b.alive && t >= a.specialReadyT && a.specialUsesLeft > 0 && rng() < sc.blastChance) {
-          b.vx += nx * sc.blastPush;
-          b.vy += ny * sc.blastPush;
+          b.vx += nx * sc.blastPush * bVtxResist;
+          b.vy += ny * sc.blastPush * bVtxResist;
           b.hp -= sc.blastDamage * a.specialPower; // 必殺強度：傷害 ×s
           a.specialReadyT = t + sc.blastCooldown * (2 - a.specialPower); // 冷卻 ×(2−s)
           a.specialUsesLeft -= 1;
@@ -802,8 +851,8 @@ function resolveCollisions(
         }
         // b 衝擊 a：把 a 沿 -法線（遠離 b）方向彈開
         if (b.special === "blast" && a.alive && t >= b.specialReadyT && b.specialUsesLeft > 0 && rng() < sc.blastChance) {
-          a.vx -= nx * sc.blastPush;
-          a.vy -= ny * sc.blastPush;
+          a.vx -= nx * sc.blastPush * aVtxResist;
+          a.vy -= ny * sc.blastPush * aVtxResist;
           a.hp -= sc.blastDamage * b.specialPower; // 必殺強度：傷害 ×s
           b.specialReadyT = t + sc.blastCooldown * (2 - b.specialPower); // 冷卻 ×(2−s)
           b.specialUsesLeft -= 1;
@@ -874,10 +923,10 @@ function applySpecials(
     }
 
     // === 觸發 ===
-    // 統一閘門：開場緩衝（graceTime）內所有必殺技不得觸發（持續效果不受影響——緩衝內根本觸發不了）。
+    // 分招閘門：開場緩衝（該招的 *GraceTime）內不得觸發（持續效果不受影響——緩衝內根本觸發不了）。
     const opp = nearestEnemy(bodies, b);
     const best = opp ? Math.hypot(opp.px - b.px, opp.py - b.py) : Infinity;
-    const ready = t >= sc.graceTime && t >= b.specialReadyT && b.specialUsesLeft > 0;
+    const ready = t >= graceTimeFor(b.special, sc) && t >= b.specialReadyT && b.specialUsesLeft > 0;
 
     if (b.special === "rush") {
       const inRange = opp !== null && best < sc.rushRange;
@@ -953,7 +1002,7 @@ function applySpecials(
  * 場地護牆：陀螺碰到邊界時反彈回場內；
  * 只有撞牆瞬間「向外速度」超過 ringOutSpeed（被打得夠猛）才會衝出護牆 Ring-out。
  */
-function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
+function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number, t: number): void {
   const box = arena.box;
   const sw = arena.softWall;
   for (const b of bodies) {
@@ -1022,7 +1071,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
     // 超橢圓邊界（弧壁場）：r(θ) 弧形牆反彈 / 對角扇區出界。
     // 圓形場（未設 superellipse）走下方原路徑 → 既有場地行為逐位元不變。
     if (arena.superellipse) {
-      resolveSuperellipseWall(b, arena, step);
+      resolveSuperellipseWall(b, arena, step, t);
       continue;
     }
 
@@ -1038,8 +1087,11 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
     const ang = Math.atan2(b.py, b.px);
     const rp = rimAt(arena, ang);
 
+    // 旋渦發動期間「等效重量上升」→ 出界門檻翻倍（防把對手拉進來對撞時自爆出界）
+    const outGate = rp.ringOutSpeed * (t < b.vortexUntilT ? VORTEX_MASS_MUL : 1);
+
     // 被打得夠猛 → 衝出護牆，判定出界（記下出界角度供計分分區用）。分身不出界 → 略過，落到下面當實牆反彈。
-    if (radialVel > rp.ringOutSpeed && !b.isClone) {
+    if (radialVel > outGate && !b.isClone) {
       markDead(b, step, "ring-out");
       b.ringOutAngle = ang;
       continue;
@@ -1063,7 +1115,7 @@ function resolveWalls(bodies: Body[], arena: ArenaConfig, step: number): void {
  * 出界門檻沿用 rim 分區機制：對角 pocket 門檻低 → 沿法線向外夠快即出界（得分語意由
  * rim score / roundPoints 自動成立）；四邊中段吃全域高門檻 → 反彈牆。
  */
-function resolveSuperellipseWall(b: Body, arena: ArenaConfig, step: number): void {
+function resolveSuperellipseWall(b: Body, arena: ArenaConfig, step: number, t: number): void {
   const r = Math.hypot(b.px, b.py) || 1e-6;
   const theta = Math.atan2(b.py, b.px);
   const limit = boundaryRadiusAt(arena, theta) - b.radius; // 陀螺邊緣貼到弧壁的中心距離
@@ -1073,8 +1125,9 @@ function resolveSuperellipseWall(b: Body, arena: ArenaConfig, step: number): voi
   const outwardVel = b.vx * n.nx + b.vy * n.ny; // 沿外法線速度（>0 向外）
   const rp = rimAt(arena, theta);
 
-  // 對角出界扇區：被打得夠猛 → 衝出弧壁 Ring-out（分身不出界 → 落到下面當實牆反彈）
-  if (outwardVel > rp.ringOutSpeed && !b.isClone) {
+  // 對角出界扇區：被打得夠猛 → 衝出弧壁 Ring-out（分身不出界 → 落到下面當實牆反彈）。
+  // 旋渦發動期間出界門檻 ×VORTEX_MASS_MUL（等效重量上升、防自爆出界）。
+  if (outwardVel > rp.ringOutSpeed * (t < b.vortexUntilT ? VORTEX_MASS_MUL : 1) && !b.isClone) {
     markDead(b, step, "ring-out");
     b.ringOutAngle = theta;
     return;

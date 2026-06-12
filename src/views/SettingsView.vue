@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
+import { useRouter } from "vue-router";
 import { useAuth } from "../store/authStore";
 import BbIcon from "../components/ui/BbIcon.vue";
 
 const auth = useAuth();
+const router = useRouter();
+
+/** 登出（從全站 header 搬到這裡）：清 session 後回登入頁 */
+async function onLogout() {
+  await auth.logout();
+  router.push("/login");
+}
 
 interface UserSettings {
   nickname: string;
@@ -129,15 +136,6 @@ async function save() {
         </label>
         <p class="hint">未改名前使用系統指派的代號，隨時可以改成自己的名字。</p>
 
-        <div class="f-label sect"><BbIcon name="lightning" :size="13" />出賽陣容</div>
-        <RouterLink class="roster-link" to="/roster">
-          <span class="roster-txt">
-            <b>出賽陣容已搬到陀螺庫</b>
-            <i>挑選 3 顆出賽陀螺與必殺技</i>
-          </span>
-          <BbIcon name="arrow-right" :size="18" />
-        </RouterLink>
-
         <div class="f-label sect"><BbIcon name="controller" :size="13" />操作偏好</div>
         <div class="grid2">
           <label class="row">
@@ -206,6 +204,12 @@ async function save() {
           </button>
           <span v-if="savedAt && !error" class="saved"><BbIcon name="check" :size="14" />已儲存</span>
         </div>
+
+        <!-- 登出（從全站 header 搬到個人設定底部） -->
+        <div class="hazard hazard--thin logout-sep"></div>
+        <button class="f-btn f-btn--danger logout-btn" @click="onLogout">
+          <BbIcon name="box-arrow-right" :size="15" />登出
+        </button>
       </template>
     </section>
   </div>
@@ -329,47 +333,6 @@ async function save() {
 }
 .row.check .bb-icon {
   color: var(--accent);
-}
-/* ---- 出賽陣容入口卡（導向 /roster） ---- */
-.roster-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  text-decoration: none;
-  color: var(--text);
-  background:
-    linear-gradient(90deg, rgba(255, 122, 24, 0.12), transparent 60%),
-    linear-gradient(180deg, #171a21, #10131a);
-  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
-  box-shadow: inset 0 0 0 1px rgba(255, 179, 31, 0.18);
-  transition: box-shadow 0.15s;
-}
-.roster-link:hover {
-  box-shadow: inset 0 0 0 1px rgba(255, 179, 31, 0.45);
-}
-.roster-link .bb-icon {
-  flex: none;
-  color: var(--accent);
-}
-.roster-txt {
-  flex: 1;
-  min-width: 0;
-}
-.roster-txt b {
-  display: block;
-  font-family: var(--f-d);
-  font-weight: 800;
-  font-size: 14.5px;
-  letter-spacing: 0.08em;
-}
-.roster-txt i {
-  display: block;
-  font-style: normal;
-  margin-top: 2px;
-  font-size: 11.5px;
-  letter-spacing: 0.05em;
-  color: var(--muted);
 }
 /* ---- 低調鋼板提示小字 ---- */
 .hint {
@@ -543,6 +506,15 @@ async function save() {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
+}
+/* ---- 登出（頁尾低調區） ---- */
+.logout-sep {
+  margin-top: 22px;
+}
+.logout-btn {
+  margin-top: 14px;
+  font-size: 13px;
+  padding: 8px 14px;
 }
 @media (max-width: 420px) {
   .grid2 {

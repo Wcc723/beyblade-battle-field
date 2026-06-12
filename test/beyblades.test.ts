@@ -97,7 +97,7 @@ describe("getBey / beyFullName", () => {
       expect(beyFullName(b)).toBe(`${b.name}-${label[b.type]}`);
     }
     // contract 範例釘死一筆
-    expect(beyFullName(getBey("prison-steel-saw")!)).toBe("獄鋼斬輪-防禦型");
+    expect(beyFullName(getBey("prison-steel-saw")!)).toBe("鐵獄電鋸-防禦型");
   });
 });
 
@@ -165,6 +165,6 @@ describe("名冊凍結鎖（id/name 永不可變；mods/數值可調不入鎖）
   });
   it("id+name checksum 凍結", () => {
     const joined = BEYBLADES.map((b) => `${b.id}:${b.name}`).join("\n");
-    expect(fnv1a(joined).toString(16)).toBe("44f8b176");
+    expect(fnv1a(joined).toString(16)).toBe("132f762a");
   });
 });

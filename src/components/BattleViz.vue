@@ -2,12 +2,13 @@
 import ArenaSvg from "./ArenaSvg.vue";
 import BbIcon from "./ui/BbIcon.vue";
 import { useBattle } from "../composables/useBattle";
+import { BEYBLADES, beyFullName } from "../game/beyblades";
 
 // 桌面版：對戰邏輯全部來自 useBattle composable（與手機版同源）。
 // 預設發射方式＝甩動 flick（composable 預設）。本檔只負責桌面版面 template + CSS。
 const bt = useBattle();
 const {
-  arena, setupA, setupB, presetKeys, PRESET_LABELS, presets, activeId, selectArena,
+  arena, setupA, setupB, presets, activeId, selectArena,
   phase, phaseText, launchA, launchB, launchMode, hintText,
   WIN_SCORE, scoreA, scoreB, roundNum, matchOver,
   result, playhead, playing, speed, slowmo,
@@ -33,9 +34,9 @@ const {
 
       <div class="player-card" :class="{ dim: phase !== 'aim-A' && !!launchA }" :style="{ borderColor: setupA.color }">
         <h3 :style="{ color: setupA.color }">紅方 A <span v-if="launchA" class="ready"><BbIcon name="check" :size="12" /> 已發射</span></h3>
-        <label class="field">類型
-          <select v-model="setupA.preset" :disabled="!!launchA">
-            <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
+        <label class="field">陀螺
+          <select v-model="setupA.beyId" :disabled="!!launchA">
+            <option v-for="b in BEYBLADES" :key="b.id" :value="b.id">{{ beyFullName(b) }}</option>
           </select>
         </label>
         <label class="field">旋向
@@ -59,9 +60,9 @@ const {
 
       <div class="player-card" :class="{ dim: phase === 'aim-A' }" :style="{ borderColor: setupB.color }">
         <h3 :style="{ color: setupB.color }">藍方 B <span v-if="launchB" class="ready"><BbIcon name="check" :size="12" /> 已發射</span></h3>
-        <label class="field">類型
-          <select v-model="setupB.preset" :disabled="!!launchB">
-            <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
+        <label class="field">陀螺
+          <select v-model="setupB.beyId" :disabled="!!launchB">
+            <option v-for="b in BEYBLADES" :key="b.id" :value="b.id">{{ beyFullName(b) }}</option>
           </select>
         </label>
         <label class="field">旋向

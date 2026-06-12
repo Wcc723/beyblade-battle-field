@@ -11,6 +11,7 @@ import type {
   SpecialEvent,
 } from "../physics/types";
 import { STAT_PRESETS, PRESET_LABELS } from "../physics/presets";
+import { getBey, resolveBeyStats } from "../game/beyblades";
 import { getActiveConfig, activePresetName, presets, activeId, setActive } from "../store/arenaStore";
 import { getStats } from "../store/statStore";
 import { special } from "../store/specialStore";
@@ -51,17 +52,30 @@ export function useBattle(opts: UseBattleOptions = {}) {
   const arenaName = ref(activePresetName());
   const maxTime = 60;
 
-  /* ---------- 玩家設定（發射前選好：類型 + 旋向） ---------- */
+  /* ---------- 玩家設定（發射前選好：陀螺 + 旋向） ---------- */
   interface Setup {
     id: string;
     color: string;
+    /** 名冊陀螺 id（測試頁可選全 10 顆；本機模擬屬性 = 類型基礎值 × 個體差） */
+    beyId: string;
+    /** 類型（跟著 beyId 自動同步；顏色 / 貼圖 / 線上 statsOverride key 照舊吃它） */
     preset: string;
     spinDir: 1 | -1;
     special: "" | SpecialKind;
   }
-  const setupA = reactive<Setup>({ id: "A", color: "#e8442e", preset: "balance", spinDir: 1, special: "rush" });
-  const setupB = reactive<Setup>({ id: "B", color: "#2e9fe8", preset: "attack", spinDir: -1, special: "blast" });
+  const setupA = reactive<Setup>({ id: "A", color: "#e8442e", beyId: "celestial-pivot-quake", preset: "balance", spinDir: 1, special: "rush" });
+  const setupB = reactive<Setup>({ id: "B", color: "#2e9fe8", beyId: "scarlet-blaze-wheel", preset: "attack", spinDir: -1, special: "blast" });
   const presetKeys = Object.keys(STAT_PRESETS);
+  // 換陀螺 → 類型自動跟隨（select 直接 v-model beyId 即可；線上模式不改 beyId、不受影響）
+  for (const s of [setupA, setupB]) {
+    watch(
+      () => s.beyId,
+      (id) => {
+        const bey = getBey(id);
+        if (bey) s.preset = bey.type;
+      },
+    );
+  }
 
   /* ---------- 對戰流程狀態機 ---------- */
   type Phase = "aim-A" | "aim-B" | "playing";
@@ -104,9 +118,14 @@ export function useBattle(opts: UseBattleOptions = {}) {
   /* ---------- 線上模式注入點 ---------- */
   // 屬性覆寫：線上對戰用伺服器（D1 全域）的 stats，不吃本機 localStorage；null = 本機行為
   const statsOverride = ref<Record<string, BeybladeStats> | null>(null);
-  function statsFor(preset: string): BeybladeStats {
-    const o = statsOverride.value?.[preset];
-    return o ? { ...o } : getStats(preset);
+  function statsFor(setup: Setup): BeybladeStats {
+    // 線上：伺服器（D1 全域）那份為準，照舊以類型為 key（DO 端已依 loadout 組裝、不在此疊個體差）
+    const o = statsOverride.value?.[setup.preset];
+    if (o) return { ...o };
+    // 本機：名冊個體差 × 該類型 tuning 基礎值（與 DO 同一條 resolveBeyStats 公式）
+    const bey = getBey(setup.beyId);
+    const base = getStats(setup.preset);
+    return bey ? resolveBeyStats(bey, base) : base;
   }
   // 必殺技數值來源：預設＝localStorage store（reactive，後台改動即時生效）；線上換成伺服器那份
   const specialCfg = ref<SpecialConfig>(special);
@@ -270,7 +289,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
       init: {
         id: setup.id,
         color: setup.color,
-        stats: statsFor(setup.preset),
+        stats: statsFor(setup),
         position: { x: dragStart.x, y: dragStart.y },
         velocity: { x: dirx * speed, y: diry * speed },
         spin,
@@ -691,9 +710,10 @@ export function useBattle(opts: UseBattleOptions = {}) {
 
   /* —— 傷害數字：跨過 collisionEvents 在受傷陀螺上方彈「-N」，dash 回血彈「+N」 —— */
   const DMG_POP_DUR = 0.8; // 上浮 + 淡出時長
-  // 全場傷害統計（彈出門檻 = 平均 × 0.35：微小摩擦傷害不彈避免洗版）；以 result 參照做快取
-  let dmgStatCache: { for: SimResult; thr: number; avg: number } | null = null;
-  function dmgPopStats(r: SimResult): { thr: number; avg: number } {
+  const DMG_POP_MAX = 24; // 同屏並發 pop 上限（超出丟最舊）：dmg≥1 全彈之後靠這個防洗版
+  // 全場平均傷害（heat 字級/字色縮放的基準）；以 result 參照做快取
+  let dmgStatCache: { for: SimResult; avg: number } | null = null;
+  function dmgPopStats(r: SimResult): { avg: number } {
     if (dmgStatCache && dmgStatCache.for === r) return dmgStatCache;
     let sum = 0;
     let n = 0;
@@ -708,7 +728,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
       }
     }
     const avg = n ? sum / n : 0;
-    dmgStatCache = { for: r, thr: Math.max(2, avg * 0.35), avg };
+    dmgStatCache = { for: r, avg };
     return dmgStatCache;
   }
   /** 傷害字色：琥珀（小傷）→ 紅（大傷），heat 0~1。 */
@@ -785,14 +805,17 @@ export function useBattle(opts: UseBattleOptions = {}) {
     }
     g.restore();
   }
-  /** 傷害/回血數字層（最上層）：位置取「事件當下」幀的陀螺座標（數字釘在受擊點上方）。 */
+  /** 傷害/回血數字層（最上層）：位置取「事件當下」幀的陀螺座標（數字釘在受擊點上方）。
+   *  dmg ≥ 1 全部彈出（小傷害用小字級）；同屏超過 DMG_POP_MAX 顆時丟最舊（事件時間序）。 */
   function drawDamagePops(g: CanvasRenderingContext2D, curT: number, frames: Frame[]) {
     const r = result.value;
     if (!r) return;
-    const { thr, avg } = dmgPopStats(r);
+    const { avg } = dmgPopStats(r);
     g.save();
     g.textAlign = "center";
     g.textBaseline = "middle";
+    // 第一遍：會心 starburst 直接畫（瞬閃不佔 pop 額度）；傷害數字先收集再裁同屏上限
+    const pops: { x: number; y: number; txt: string; color: string; fontPx: number; age: number; seed: number; gold: boolean; prefix: string }[] = [];
     for (let k = 0; k < r.collisionEvents.length; k++) {
       const ce = r.collisionEvents[k];
       const age = curT - ce.t;
@@ -803,30 +826,36 @@ export function useBattle(opts: UseBattleOptions = {}) {
         const [ex, ey] = toCanvas(ce.x, ce.y);
         drawCritBurst(g, ex, ey, age, k);
       }
-      const pops: [string | undefined, number | undefined, "dmg" | "kb" | undefined][] = [
+      const sides: [string | undefined, number | undefined, "dmg" | "kb" | undefined][] = [
         [ce.aId, ce.dmgA, ce.critA],
         [ce.bId, ce.dmgB, ce.critB],
       ];
       for (let pi = 0; pi < 2; pi++) {
-        const [id, dmg, crit] = pops[pi];
+        const [id, dmg, crit] = sides[pi];
         if (!id) continue;
         const body = fb.bodies.find((x) => x.id === id);
         if (!body) continue;
         const [bx, by] = toCanvas(body.x, body.y);
         // 會心擊飛：受擊陀螺位置彈金黃「擊飛!」短字（與傷害數字 seed 錯開、不疊字）
-        if (crit === "kb") drawOnePop(g, bx, by, "擊飛!", "#ffd700", 20, age, k * 2 + pi + 211, true);
-        // 會心傷害一律彈（×2 後通常過門檻；保險起見不吃門檻）；一般傷害低於門檻不彈避免洗版
-        if (dmg == null || (dmg < thr && crit !== "dmg")) continue; // 舊回放資料無傷害欄位 → 不彈
+        if (crit === "kb")
+          pops.push({ x: bx, y: by, txt: "擊飛!", color: "#ffd700", fontPx: 20, age, seed: k * 2 + pi + 211, gold: true, prefix: "" });
+        if (dmg == null) continue; // 舊回放資料無傷害欄位 → 不彈
         const n = Math.round(dmg);
-        if (n < 1) continue;
+        if (n < 1) continue; // dmg ≥ 1 全部彈出（不再吃平均門檻）
         const heat = Math.min(1, dmg / Math.max(1, avg * 2.2)); // 平均的 2.2 倍 → 全紅最大字
+        const fontPx = Math.round(12 + 22 * heat); // 下限縮小：微小摩擦傷害＝小字不搶戲，大傷上限不變
         if (crit === "dmg") {
           // 會心傷害：金黃→琥珀漸層、字級 ×1.35、上方「會心」小字
-          drawOnePop(g, bx, by, `-${n}`, "#ffd700", Math.round((17 + 17 * heat) * 1.35), age, k * 2 + pi, true, "會心");
+          pops.push({ x: bx, y: by, txt: `-${n}`, color: "#ffd700", fontPx: Math.round(fontPx * 1.35), age, seed: k * 2 + pi, gold: true, prefix: "會心" });
         } else {
-          drawOnePop(g, bx, by, `-${n}`, dmgColor(heat), Math.round(17 + 17 * heat), age, k * 2 + pi);
+          pops.push({ x: bx, y: by, txt: `-${n}`, color: dmgColor(heat), fontPx, age, seed: k * 2 + pi, gold: false, prefix: "" });
         }
       }
+    }
+    // 同屏上限：collisionEvents 本身按時間排序 → 超量時砍掉最前面（最舊）的，只畫最新 DMG_POP_MAX 顆
+    for (let i = Math.max(0, pops.length - DMG_POP_MAX); i < pops.length; i++) {
+      const p = pops[i];
+      drawOnePop(g, p.x, p.y, p.txt, p.color, p.fontPx, p.age, p.seed, p.gold, p.prefix);
     }
     // dash 回血：綠色「+N」（--ok）
     for (let k = 0; k < r.specialEvents.length; k++) {
@@ -1505,7 +1534,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     const f = frameAt();
     const b = f?.bodies.find((x) => x.id === id);
     if (!b) return 0;
-    const maxHp = maxHpFor(statsFor(id === "A" ? setupA.preset : setupB.preset), arena.value.hpBase);
+    const maxHp = maxHpFor(statsFor(id === "A" ? setupA : setupB), arena.value.hpBase);
     return Math.max(0, Math.min(100, (b.hp / maxHp) * 100));
   }
   const teamIds = ["A", "B"];

@@ -3,11 +3,12 @@ import { computed } from "vue";
 import ArenaSvg from "./ArenaSvg.vue";
 import BbIcon from "./ui/BbIcon.vue";
 import { useBattle } from "../composables/useBattle";
+import { BEYBLADES, beyFullName } from "../game/beyblades";
 
 // 手機版只負責「手機專屬版面」，對戰邏輯全部來自 useBattle（與桌面版同源）。
 const bt = useBattle({ defaultLaunchMode: "sling" });
 const {
-  arena, setupA, setupB, presetKeys, PRESET_LABELS, presets, activeId, selectArena,
+  arena, setupA, setupB, presets, activeId, selectArena,
   phase, phaseText, launchA, launchB, launchMode, hintText,
   WIN_SCORE, scoreA, scoreB, roundNum, matchOver,
   result, playhead, playing, speed, slowmo,
@@ -79,9 +80,9 @@ const phaseClass = computed(() =>
       </div>
 
       <div class="setup-grid">
-        <label>類型
-          <select v-model="active.preset">
-            <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
+        <label>陀螺
+          <select v-model="active.beyId">
+            <option v-for="b in BEYBLADES" :key="b.id" :value="b.id">{{ beyFullName(b) }}</option>
           </select>
         </label>
         <label>旋向

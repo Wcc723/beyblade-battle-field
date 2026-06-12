@@ -102,7 +102,9 @@ export type ClientMsg =
   | { type: "loadout"; loadout: Partial<PlayerLoadout> }
   | { type: "launch"; aim: AimInput }
   | { type: "next-round" }
-  | { type: "rematch" };
+  | { type: "rematch" }
+  /** 房主關房（僅 A 側且 phase=waiting 有效）：DO 清房、通知大廳下架、全連線 close(4002) */
+  | { type: "close-room" };
 
 export type ServerMsg =
   | { type: "room"; you: Side; snapshot: RoomSnapshot }

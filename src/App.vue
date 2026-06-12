@@ -1,24 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import { RouterLink, RouterView, useRoute } from "vue-router";
 import { useAuth } from "./store/authStore";
 import BbIcon from "./components/ui/BbIcon.vue";
 
 const auth = useAuth();
-const router = useRouter();
 const route = useRoute();
 
 onMounted(() => auth.ensureLoaded());
-
-async function onLogout() {
-  await auth.logout();
-  router.push("/login");
-}
 
 // 行動版 Tab Bar：對戰廳與測試頁要沉浸，整條隱藏
 const hideTabbar = computed(() =>
   ["room", "test-battle", "test-mobile"].includes(String(route.name ?? "")),
 );
+
+// 行動版對戰廳全沉浸：連 header 都隱藏（桌機保留水平導覽）
+const immersiveRoom = computed(() => route.name === "room");
 
 // 無頭像時的縮寫字母圓徽（取名稱或信箱首字）
 const initial = computed(() => {
@@ -29,7 +26,7 @@ const initial = computed(() => {
 </script>
 
 <template>
-  <div class="page" :class="{ 'with-tabbar': !hideTabbar }">
+  <div class="page" :class="{ 'with-tabbar': !hideTabbar, 'room-immersive': immersiveRoom }">
     <header class="forge-header plate plate--rivets">
       <div class="brand">
         <span class="emblem" aria-hidden="true">
@@ -69,10 +66,6 @@ const initial = computed(() => {
           />
           <span v-else class="avatar avatar-fallback">{{ initial }}</span>
           <span class="uname">{{ auth.user.value.name || auth.user.value.email }}</span>
-          <button class="logout f-btn f-btn--ghost" title="登出" @click="onLogout">
-            <BbIcon name="box-arrow-right" :size="15" />
-            <span class="logout-txt">登出</span>
-          </button>
         </template>
         <RouterLink v-else class="login-link f-btn f-btn--primary" to="/login">登入</RouterLink>
       </div>
@@ -248,7 +241,6 @@ const initial = computed(() => {
   white-space: nowrap;
 }
 /* 機台鍵縮小版（覆寫 .f-btn 尺寸） */
-.logout,
 .login-link {
   min-height: 34px;
   padding: 6px 12px;
@@ -326,8 +318,7 @@ const initial = computed(() => {
   .tabbar {
     display: grid;
   }
-  .uname,
-  .logout-txt {
+  .uname {
     display: none;
   }
   .brand-txt b {
@@ -336,6 +327,13 @@ const initial = computed(() => {
   .brand-txt em {
     font-size: 9px;
     letter-spacing: 0.3em;
+  }
+  /* 對戰廳沉浸模式：行動版連 header 都收掉，內容頂到安全區 */
+  .page.room-immersive {
+    padding-top: calc(10px + env(safe-area-inset-top));
+  }
+  .page.room-immersive .forge-header {
+    display: none;
   }
 }
 </style>

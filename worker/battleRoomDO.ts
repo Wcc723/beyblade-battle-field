@@ -38,7 +38,7 @@ import {
 import { autoNickname } from "../src/game/names";
 import { BEYBLADES, getBey, resolveBeyStats, DEFAULT_LINEUP } from "../src/game/beyblades";
 import type { ArenaConfig, SpecialKind } from "../src/physics/types";
-import { readGameConfig, readLineup, type GameConfig, type LineupEntry } from "./api";
+import { applyBeyOverrides, readGameConfig, readLineup, type GameConfig, type LineupEntry } from "./api";
 
 const AIM_MS = 45_000; // 瞄準時限（到點自動以預設參數發射）
 const IDLE_CLEANUP_MS = 10 * 60_000; // 全員離線後清房
@@ -305,6 +305,24 @@ export class BattleRoomDO extends DurableObject<Env> {
         await this.broadcastRoom(room);
         return;
       }
+      case "close-room": {
+        // 房主關房：僅 A 側且還在等對手（waiting）時有效 → 清房、通知大廳下架、全連線 4002 關閉
+        if (att.side !== "A" || room.phase !== "waiting") return;
+        // 注意：deleteAll() 不會清 pending alarm——殘留鬧鐘到點時 handleAlarm 會對空房殼
+        // 再跑一次清理（冪等、會重打一次 notifyLobbyClosed，無害）；4002 關閉觸發的
+        // webSocketClose 也可能短暫重建空房殼，同樣由該輪 alarm 收掉。
+        await this.ctx.storage.deleteAll();
+        await this.ctx.storage.deleteAlarm();
+        await this.notifyLobbyClosed(room.code);
+        for (const cws of this.ctx.getWebSockets()) {
+          try {
+            cws.close(4002, "room-closed");
+          } catch {
+            /* ignore */
+          }
+        }
+        return;
+      }
       case "rematch": {
         if (room.phase !== "finished") return;
         room.scoreA = 0;
@@ -415,7 +433,7 @@ export class BattleRoomDO extends DurableObject<Env> {
       // beyId → 名冊個體差 × 類型基礎屬性（client 只送 beyId/special，數值全由伺服器組裝 → 防竄改）
       const bey = getBey(p.loadout.beyId) ?? BEYBLADES[0];
       const base = cfg.stats[bey.type] ?? cfg.stats.balance;
-      return buildInitFromAim(s, p.loadout, resolveBeyStats(bey, base), room.aims[s]!);
+      return buildInitFromAim(s, p.loadout, resolveBeyStats(applyBeyOverrides(bey, cfg.beys), base), room.aims[s]!);
     });
     // seed：雙方提交後才產生（防離線暴搜）
     const seed = crypto.getRandomValues(new Uint32Array(1))[0];
@@ -460,8 +478,8 @@ export class BattleRoomDO extends DurableObject<Env> {
     if (this.ctx.getWebSockets().length === 0) room.idleSince ??= Date.now();
     await this.saveRoom(room);
 
-    // 比賽結束 → 寫一筆戰績到 D1（失敗不擋遊戲流程）
-    if (matchOver && room.players.A && room.players.B && room.winnerSide) {
+    // 比賽結束 → 寫一筆戰績到 D1（失敗不擋遊戲流程）；BOT 對戰是練習場性質，一律不落庫
+    if (matchOver && room.players.A && room.players.B && room.winnerSide && !room.players.A.isBot && !room.players.B.isBot) {
       const a = room.players.A;
       const b = room.players.B;
       try {

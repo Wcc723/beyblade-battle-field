@@ -30,6 +30,7 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
   const roomFull = ref(false);
   const superseded = ref(false); // 同帳號開了新分頁，本連線被取代
   const authLost = ref(false); // session 失效：停止重連
+  const roomClosed = ref(false); // 房主關房（DO close 4002）：不重連，view 收到後回大廳
   const errorMsg = ref("");
   const opponentJustLaunched = ref(false);
   const sentLaunch = ref(false); // 本地已送出發射（伺服器 echo 前先擋重複瞄準）
@@ -179,6 +180,10 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
         superseded.value = true; // 被新分頁取代：不重連
         return;
       }
+      if (e.code === 4002) {
+        roomClosed.value = true; // 房主關房：不重連（view watch 到後導回大廳）
+        return;
+      }
       if (closedByUs) return;
       // 連續握手失敗 → 可能 session 過期（401 不升級）：確認後停止重試
       if (!opened && ++consecutiveFails >= 3) {
@@ -247,6 +252,11 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
     sendJson({ type: "rematch" });
   }
 
+  /** 房主關閉房間（DO 驗證：僅 A 側且 waiting 有效）；成功時 DO 會以 4002 關閉本連線 */
+  function closeRoom(): void {
+    sendJson({ type: "close-room" });
+  }
+
   return {
     // 狀態
     you,
@@ -256,6 +266,7 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
     roomFull,
     superseded,
     authLost,
+    roomClosed,
     errorMsg,
     opponentJustLaunched,
     opponentAdvanced,
@@ -273,5 +284,6 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
     sendLoadout,
     nextRound,
     rematch,
+    closeRoom,
   };
 }

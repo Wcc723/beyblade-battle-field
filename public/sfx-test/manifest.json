@@ -1,0 +1,16 @@
+{
+  "_說明": "把音檔丟進 public/sfx-test/<槽位>/ 並在此登記。例如 \"hit-light\": [\"clang-1.wav\", \"clang-2.mp3\"] 會對應 public/sfx-test/hit-light/clang-1.wav 等。詳見同目錄 README.md。",
+  "hit-light": [],
+  "hit-medium": [],
+  "hit-heavy": [],
+  "ko": [],
+  "ring-out": [],
+  "spin-out": [],
+  "launch": [],
+  "special-rush": [],
+  "special-blast": [],
+  "special-dash": [],
+  "special-vortex": [],
+  "special-clone": [],
+  "win": []
+}

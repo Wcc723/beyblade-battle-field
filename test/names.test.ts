@@ -116,7 +116,7 @@ describe("名池凍結鎖（使用者要求：名字不可因部署而變動）"
     expect(BEYBLADE_POOL.length).toBe(66);
   });
   it("內容 checksum 凍結", () => {
-    expect(fnv1a(NICKNAME_POOL.join("\n")).toString(16)).toBe("8de8c6d4");
+    expect(fnv1a(NICKNAME_POOL.join("\n")).toString(16)).toBe("12b004d0");
     expect(fnv1a(BEYBLADE_POOL.join("\n")).toString(16)).toBe("ff147126");
   });
 });

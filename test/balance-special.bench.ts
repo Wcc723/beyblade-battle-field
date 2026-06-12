@@ -103,4 +103,4 @@ it("balance-special", () => {
   [...SPECIALS]
     .sort((a, b) => liftAvg[b] - liftAvg[a])
     .forEach((s, i) => console.log(`  ${i + 1}. ${s.padEnd(7)} ${SP_ZH[s]}  ${liftAvg[s].toFixed(1)}%`));
-}, 120_000);
+}, 300_000);

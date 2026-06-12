@@ -2,8 +2,8 @@
  * 陀螺名冊（純模組：零 Env、零 DOM——worker 與前端共用）。
  *
  * - BEYBLADES：全服固定 roster（id/name 永不可變，受 test/beyblades.test.ts 凍結鎖保護）。
- * - 名字取自 names.ts 的 BEYBLADE_POOL 風格（硬編碼、不 import pool——roster 是獨立真相，
- *   pool 凍結不動）；嚴禁任何官方戰鬥陀螺詞彙。
+ * - 名字走日式 / 美式中二「兵器 / 機體」風（硬編碼、不 import names.ts 的 pool——
+ *   roster 是獨立真相，pool 凍結不動）；嚴禁任何官方戰鬥陀螺詞彙與知名作品角色名。
  * - mods 是「乘在類型基礎屬性上」的小幅個體差（0.92~1.08）：同類型兩顆要有手感差，
  *   不可有全維度優勢顆（高 crit 配低 specialPower 之類的取捨）。
  * - 數值（mods/crit/specialPower）可調平衡，不入凍結鎖；id/name 入鎖。
@@ -30,7 +30,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 玻璃大砲：火力最高、皮最薄，必殺也兇
     id: "scarlet-blaze-wheel",
-    name: "赤霄焚輪",
+    name: "緋空斬月",
     type: "attack",
     mods: { attack: 1.08, defense: 0.93 },
     crit: 0.05,
@@ -39,7 +39,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 會心刺客：全 roster 最高會心，代價是輕量化與最弱必殺
     id: "sky-rending-claw",
-    name: "撕天利爪",
+    name: "裂空隼牙",
     type: "attack",
     mods: { attack: 1.03, weight: 0.95 },
     crit: 0.08,
@@ -48,7 +48,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 重斬處刑：難得的重量級攻擊型，續航換壓場
     id: "judgment-guillotine",
-    name: "斷罪鍘刃",
+    name: "午夜斷頭台",
     type: "attack",
     mods: { weight: 1.05, stamina: 0.93 },
     crit: 0.06,
@@ -58,7 +58,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 鐵壁大招：最硬+全 roster 最強必殺，幾乎不出會心
     id: "abyss-heavy-armor",
-    name: "玄冥重甲",
+    name: "深淵要塞式",
     type: "defense",
     mods: { defense: 1.07, stamina: 0.94 },
     crit: 0.03,
@@ -67,7 +67,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 反擊之盾：帶刃的防禦型，犧牲一點硬度換反打火力
     id: "prison-steel-saw",
-    name: "獄鋼斬輪",
+    name: "鐵獄電鋸",
     type: "defense",
     mods: { attack: 1.06, defense: 0.96 },
     crit: 0.06,
@@ -76,7 +76,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 隕鐵重坦：極限配重抗出界，拳頭軟
     id: "fallen-star-armor",
-    name: "隕星墜甲",
+    name: "星隕之鎧",
     type: "defense",
     mods: { weight: 1.08, attack: 0.94 },
     crit: 0.04,
@@ -86,7 +86,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 永動冰輪：純粹的轉到你停，幾乎放棄火力
     id: "frost-fang-orbit",
-    name: "霜牙迴天",
+    name: "永凍月輪",
     type: "stamina",
     mods: { stamina: 1.07, attack: 0.93 },
     crit: 0.04,
@@ -95,7 +95,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 削旋風暴：會咬人的持久型，續航上限略低
     id: "hurricane-vortex-core",
-    name: "颶風渦核",
+    name: "嵐之禪",
     type: "stamina",
     mods: { attack: 1.05, stamina: 0.96 },
     crit: 0.06,
@@ -105,7 +105,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 穩重全能：配重取向的平衡型，站得穩但收尾慢
     id: "celestial-pivot-quake",
-    name: "天璇地破",
+    name: "天樞震岳",
     type: "balance",
     mods: { weight: 1.06, stamina: 0.95 },
     crit: 0.05,
@@ -114,7 +114,7 @@ export const BEYBLADES: readonly BeyDef[] = [
   {
     // 靈巧搶攻：輕快帶會心的平衡型，必殺最弱檔
     id: "violet-thunder-blade",
-    name: "紫宸雷刃",
+    name: "紫電居合",
     type: "balance",
     mods: { attack: 1.06, weight: 0.94 },
     crit: 0.07,

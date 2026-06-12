@@ -36,6 +36,9 @@ function match(redType: T, blueType: T, arena: ArenaConfig, rng: () => number) {
 it("balance", () => {
   const rng = makeRng(20260608);
   const reasons: Record<string, number> = { "ring-out": 0, "spin-out": 0, timeout: 0, draw: 0, ko: 0, burst: 0 };
+  // 戰局時長統計（秒，不含 followThrough——bench 的 followThroughTime 為 0，duration 即分勝負時刻）
+  const durations: number[] = [];
+  const durByReason: Record<string, number[]> = {};
   // 平手構成診斷：雙KO / 雙停轉(hp 完全相等) / 雙出界 / 混合同步（死法不同）/ 其他（timeout 同分等）
   const drawKinds: Record<string, number> = { "雙ko": 0, "雙spin-out": 0, "雙ring-out": 0, "混合同步": 0, "其他": 0 };
   const classifyDraw = (r: ReturnType<typeof match>) => {
@@ -64,6 +67,8 @@ it("balance", () => {
         const r = match(x, y, DEFAULT_ARENA, rng);
         reasons[r.reason]++;
         pr[r.reason]++;
+        durations.push(r.duration);
+        (durByReason[r.reason] ??= []).push(r.duration);
         if (!r.winnerId) classifyDraw(r);
         if (r.winnerId === "R") xWins++;
         if (r.winnerId) games++;
@@ -73,6 +78,8 @@ it("balance", () => {
         const r = match(y, x, DEFAULT_ARENA, rng);
         reasons[r.reason]++;
         pr[r.reason]++;
+        durations.push(r.duration);
+        (durByReason[r.reason] ??= []).push(r.duration);
         if (!r.winnerId) classifyDraw(r);
         if (r.winnerId === "B") xWins++;
         if (r.winnerId) games++;
@@ -96,6 +103,18 @@ it("balance", () => {
 
   console.log("\n=== 各類型整體勝率（對其他三類型平均）===");
   for (const x of TYPES) console.log(`  ${x.padEnd(8)} ${overall[x].toFixed(1)}%`);
+
+  // 平均 / 中位戰局時長（不含 followThrough；目標帶 20~30s）+ 各勝負原因的平均時長
+  const sortedDur = [...durations].sort((a, b) => a - b);
+  const mean = durations.reduce((s, d) => s + d, 0) / Math.max(1, durations.length);
+  const median = sortedDur[Math.floor(sortedDur.length / 2)] ?? 0;
+  console.log("\n=== 戰局時長（秒，不含 followThrough）===");
+  console.log(`  平均 ${mean.toFixed(1)}s   中位 ${median.toFixed(1)}s   p10 ${sortedDur[Math.floor(sortedDur.length * 0.1)]?.toFixed(1)}s   p90 ${sortedDur[Math.floor(sortedDur.length * 0.9)]?.toFixed(1)}s`);
+  for (const k of Object.keys(durByReason)) {
+    const arr = durByReason[k];
+    console.log(`  ${k.padEnd(9)} 平均 ${(arr.reduce((s, d) => s + d, 0) / arr.length).toFixed(1)}s（${arr.length} 場）`);
+  }
+
   console.log("\n=== 勝負原因分佈 ===");
   for (const k of Object.keys(reasons)) console.log(`  ${k.padEnd(9)} ${((reasons[k] / total) * 100).toFixed(1)}%`);
   console.log("\n=== 平手構成（佔全部場數 %）===");
@@ -113,4 +132,4 @@ it("balance", () => {
       .join("  ");
     console.log(`  ${pair.padEnd(22)} ${parts}`);
   }
-}, 120_000);
+}, 300_000);

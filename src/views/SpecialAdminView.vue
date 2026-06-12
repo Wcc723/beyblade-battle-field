@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
-import BeybladeAdmin from "../components/BeybladeAdmin.vue";
+import SpecialAdmin from "../components/SpecialAdmin.vue";
 import { localTuningApi, createRemoteTuningApi, type TuningStoreApi } from "../store/adminBackend";
 
 const router = useRouter();
@@ -23,10 +23,10 @@ onBeforeUnmount(() => remoteApi?.dispose?.());
     <button :class="{ active: mode === 'online' }" @click="mode = 'online'">線上設定（D1）</button>
     <button :class="{ active: mode === 'local' }" @click="mode = 'local'">本機測試（localStorage）</button>
     <span class="mode-hint">
-      {{ mode === "online" ? "正式線上對戰用的全域屬性/個體調整（所有玩家共用）；必殺技搬到「必殺技後台」" : "測試頁用的本機數值" }}
+      {{ mode === "online" ? "正式線上對戰用的全域必殺技數值（所有玩家共用）" : "測試頁用的本機數值" }}
     </span>
   </div>
-  <BeybladeAdmin
+  <SpecialAdmin
     :key="mode"
     :tuning="tuningFor(mode)"
     :show-go-battle="mode === 'local'"

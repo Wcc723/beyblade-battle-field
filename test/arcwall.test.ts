@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { simulate, buildInit, ARC_WALL_STADIUM } from "../src/physics/engine";
-import { boundaryRadiusAt, boundaryNormalAt, rimScoreAt } from "../src/physics/arena";
+import { boundaryRadiusAt, boundaryNormalAt, rimScoreAt, rimAt } from "../src/physics/arena";
 import { roundPoints } from "../src/game/scoring";
 import { STAT_PRESETS } from "../src/physics/presets";
 import type { BeybladeInit, SimConfig } from "../src/physics/types";
@@ -59,6 +59,23 @@ describe("弧壁競技場：超橢圓幾何", () => {
     const nd = boundaryNormalAt(ARENA, Math.PI / 4);
     expect(nd.nx).toBeCloseTo(nd.ny, 9);
     expect(nd.nx).toBeCloseTo(Math.SQRT1_2, 6);
+  });
+});
+
+describe("弧壁競技場：出界口只在四個對角", () => {
+  it("四邊中段（軸向）為一般牆、四對角為 2 分 pocket（視覺「最外層四角出界區」的幾何依據）", () => {
+    // ArenaSvg 把 hazard 區畫在「邊界與機殼內緣之間的四個外角」——前提是 rim 出界扇區
+    // 恰好只覆蓋四個對角、四邊中段必為一般牆（不可出界），此測試鎖住該前提。
+    for (const a of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+      const rp = rimAt(ARENA, a);
+      expect(rp.kind).toBe("wall");
+      expect(rp.score).toBe(1);
+    }
+    for (const a of [Math.PI / 4, (3 * Math.PI) / 4, (-3 * Math.PI) / 4, -Math.PI / 4]) {
+      const rp = rimAt(ARENA, a);
+      expect(rp.kind).toBe("pocket");
+      expect(rp.score).toBe(2);
+    }
   });
 });
 
