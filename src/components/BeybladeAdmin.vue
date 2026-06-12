@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { BeybladeStats, SpecialConfig } from "../physics/types";
+import type { SpecialConfig } from "../physics/types";
 import { PRESET_LABELS } from "../physics/presets";
 import { localTuningApi, type TuningStoreApi } from "../store/adminBackend";
 import BbIcon from "./ui/BbIcon.vue";
@@ -68,7 +68,8 @@ function onSpecial() {
   tuning.persistSpecial();
 }
 
-const STAT_FIELDS: { key: keyof BeybladeStats; label: string; hint: string }[] = [
+// 後台滑桿只調四圍（crit / specialPower 屬個體差，由 roster 定義、不在此調）→ key 收窄到四圍
+const STAT_FIELDS: { key: "attack" | "defense" | "stamina" | "weight"; label: string; hint: string }[] = [
   { key: "attack", label: "攻擊", hint: "碰撞扣對手血量（耐久）+ 擊退" },
   { key: "defense", label: "防禦", hint: "減少自身受到的血量傷害 + 擊退" },
   { key: "stamina", label: "續航", hint: "越高自旋（續航條）衰減越慢" },
@@ -128,6 +129,13 @@ function onInput() {
     <div class="special-head">
       <h3><BbIcon name="lightning" :size="16" /> 必殺技數值（每招分開設定）</h3>
       <button class="reset" @click="resetSpecial">還原預設</button>
+    </div>
+    <!-- 全招共通閘門：graceTime（引擎在 t < graceTime 一律不觸發必殺） -->
+    <div class="special-card grace-card">
+      <label class="field grace-field">
+        <span>開場緩衝（秒）——此時間內所有必殺技不會觸發 <b>{{ special.graceTime.toFixed(1) }}</b></span>
+        <input type="range" min="0" max="10" step="0.5" v-model.number="special.graceTime" @input="onSpecial" />
+      </label>
     </div>
     <div class="special-grid">
       <div class="special-card">
@@ -295,6 +303,13 @@ function onInput() {
   margin: 0 0 12px;
   font-size: 12px;
   color: var(--muted);
+}
+.grace-card {
+  padding: 12px 16px;
+}
+.grace-field {
+  margin-bottom: 0;
+  max-width: 460px;
 }
 .sp-grid {
   display: grid;

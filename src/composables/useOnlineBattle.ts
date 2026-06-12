@@ -9,6 +9,7 @@
 import { computed, ref, watch } from "vue";
 import type { useBattle } from "./useBattle";
 import type { AimInput, PlayerLoadout, RoomSnapshot, RoundOutcome, ServerMsg, Side } from "../game/room";
+import { getBey } from "../game/beyblades";
 import { playLaunch } from "../audio/sfx";
 
 type BT = ReturnType<typeof useBattle>;
@@ -47,6 +48,12 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
   const me = computed(() => (you.value && snapshot.value ? snapshot.value.players[you.value] : undefined));
   const oppSide = computed<Side | null>(() => (you.value === "A" ? "B" : you.value === "B" ? "A" : null));
   const opponent = computed(() => (oppSide.value && snapshot.value ? snapshot.value.players[oppSide.value] : undefined));
+  /** 本場 match 的場地（DO 從啟用池隨機抽出、整場固定）：footer 顯示用 */
+  const matchArena = computed<{ id: string; name: string } | null>(() => {
+    const s = snapshot.value;
+    if (!s || (!s.arenaId && !s.arenaName)) return null;
+    return { id: s.arenaId ?? "", name: s.arenaName ?? "" };
+  });
   const myLaunched = computed(() => sentLaunch.value || !!me.value?.launched);
   /** 瞄準倒數（秒）；非瞄準階段 = null */
   const aimRemaining = computed(() => {
@@ -86,11 +93,12 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
     if (!bt || !snapshot.value || !you.value) return;
     const s = snapshot.value;
     // 雙方 loadout → setups（顏色固定 A 紅 B 藍；貼圖/必殺/旋向跟著伺服器真相）
+    // loadout 只帶 beyId：類型由名冊（getBey）解析 → 貼圖/本機顯示用屬性跟著類型走
     for (const side of ["A", "B"] as Side[]) {
       const p = s.players[side];
       if (!p) continue;
       const setup = side === "A" ? bt.setupA : bt.setupB;
-      setup.preset = p.loadout.type;
+      setup.preset = getBey(p.loadout.beyId)?.type ?? "balance";
       setup.spinDir = p.loadout.spinDir;
       setup.special = p.loadout.special;
     }
@@ -253,6 +261,7 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
     opponentAdvanced,
     me,
     opponent,
+    matchArena,
     myLaunched,
     aimRemaining,
     // 接線 / 生命週期

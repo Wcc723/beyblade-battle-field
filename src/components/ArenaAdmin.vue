@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import type { ArenaConfig } from "../physics/types";
 import { DEFAULT_ARENA } from "../physics/engine";
 import { localArenaApi, type ArenaStoreApi } from "../store/adminBackend";
@@ -12,6 +12,20 @@ const props = withDefaults(defineProps<{ store?: ArenaStoreApi; showGoBattle?: b
 });
 const store = props.store ?? localArenaApi;
 const { presets, activeId, ready, error } = store;
+
+// 線上(D1) 才有場地隨機池：local（測試頁、單場地概念）不提供 enabledIds → 不渲染「線上啟用」勾選
+const enabledIds = store.enabledIds;
+const enabledCount = computed(() => enabledIds?.value.length ?? 0);
+function isEnabled(id: string): boolean {
+  return enabledIds?.value.includes(id) ?? false;
+}
+/** 最後一個啟用場地不可取消（池至少一場）→ checkbox disable + 提示。 */
+function isLastEnabled(id: string): boolean {
+  return isEnabled(id) && enabledCount.value <= 1;
+}
+function onEnableChange(id: string, ev: Event): void {
+  void store.setEnabled?.(id, (ev.target as HTMLInputElement).checked);
+}
 
 defineEmits<{ (e: "go-battle"): void }>();
 
@@ -207,6 +221,7 @@ async function factoryReset(id: string) {
     <!-- 已存場地列表 -->
     <section class="list card">
       <h3>已儲存場地（{{ presets.length }}）</h3>
+      <p v-if="enabledIds" class="pool-hint">每場線上對戰會從已啟用的場地隨機選一場（至少保留一個啟用）。</p>
       <p v-if="presets.length === 0" class="empty">尚無場地，先在左側編輯後「另存為新場地」。</p>
       <ul>
         <li v-for="p in presets" :key="p.id" :class="{ active: p.id === activeId }">
@@ -216,6 +231,23 @@ async function factoryReset(id: string) {
             <span class="tag" v-if="p.id === activeId">套用中</span>
             <span class="tag builtin" v-if="p.builtin">內建</span>
           </div>
+          <!-- 線上啟用勾選（只在線上(D1)資料源顯示）：金屬方形勾選鍵，樣式比照 LobbyView -->
+          <label
+            v-if="enabledIds"
+            class="enable-toggle"
+            :class="{ locked: isLastEnabled(p.id) }"
+            :title="isLastEnabled(p.id) ? '至少要保留一個啟用場地' : '加入線上對戰的場地隨機池'"
+          >
+            <input
+              type="checkbox"
+              class="en-check"
+              :checked="isEnabled(p.id)"
+              :disabled="isLastEnabled(p.id)"
+              @change="onEnableChange(p.id, $event)"
+            />
+            <span class="en-box" aria-hidden="true"><BbIcon name="check" :size="12" /></span>
+            <span class="en-txt">線上啟用</span>
+          </label>
           <div class="ops">
             <button @click="store.setActive(p.id)" :disabled="p.id === activeId">套用</button>
             <button @click="loadToEditor(p.id)">編輯</button>
@@ -441,6 +473,61 @@ async function factoryReset(id: string) {
 .tag.builtin {
   color: var(--muted);
   border-color: var(--line);
+}
+.pool-hint {
+  margin: -6px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+/* 線上啟用：金屬方形勾選鍵（樣式比照 LobbyView 的公開房間勾選） */
+.enable-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.enable-toggle.locked {
+  cursor: default;
+  opacity: 0.55;
+}
+.en-check {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.en-box {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: transparent;
+  background: linear-gradient(180deg, #0b0d12, #14171e 80%);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85), inset 0 0 0 1px rgba(170, 180, 196, 0.25);
+  transition: color 0.12s, box-shadow 0.12s;
+}
+.en-check:checked + .en-box {
+  color: var(--accent);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85), inset 0 0 0 1px rgba(255, 179, 31, 0.55);
+}
+.en-check:focus-visible + .en-box {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.en-txt {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.en-check:checked ~ .en-txt {
+  color: var(--accent);
 }
 .ops {
   display: flex;

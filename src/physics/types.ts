@@ -23,6 +23,10 @@ export interface BeybladeStats {
   stamina: number;
   /** 重量：質量，影響動量與被擊退/出界的難度 */
   weight: number;
+  /** 會心機率（每次碰撞、每側獨立判定；效果 = 對方該次傷害 ×2 或 擊退 ×2，50/50）。未設 = 0.05。可選 */
+  crit?: number;
+  /** 必殺強度 s（1.0 基準）：必殺冷卻 ×(2−s)、rush/blast/clone 傷害 ×s。未設 = 1.0。可選 */
+  specialPower?: number;
 }
 
 /** 引擎實際吃的初始化資料（已換算成世界座標 / 速度 / 自旋量） */
@@ -299,6 +303,10 @@ export interface CollisionEvent {
   dmgA?: number;
   /** B 實際扣血量（含 ±10% 浮動後的最終值）。可選 */
   dmgB?: number;
+  /** A 這次「被會心打」的效果（"dmg"=A 受到的傷害 ×2、"kb"=A 受到的擊退 ×2）。未會心 = 不帶。可選 */
+  critA?: "dmg" | "kb";
+  /** B 這次「被會心打」的效果（同上）。可選 */
+  critB?: "dmg" | "kb";
 }
 
 /** 淘汰事件（供回放擊破/出界特效用） */

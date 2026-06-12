@@ -75,6 +75,11 @@ export const DEFAULT_SPECIAL: SpecialConfig = {
 
 /** 血量（耐久條）基準預設：maxHp = hpBase × 重量 */
 export const HP_BASE = 1100;
+
+/** 會心機率預設（stats.crit 未設時用）。效果：對方該次傷害 ×2 或 擊退 ×2（50/50 擲骰） */
+export const DEFAULT_CRIT = 0.05;
+/** 必殺強度預設（stats.specialPower 未設時用）：必殺冷卻 ×(2−s)、rush/blast/clone 傷害 ×s */
+export const DEFAULT_SPECIAL_POWER = 1.0;
 export function maxHpFor(stats: BeybladeStats, hpBase: number = HP_BASE): number {
   return hpBase * Math.max(0.2, stats.weight);
 }
@@ -86,6 +91,10 @@ interface Body {
   attack: number;
   defense: number;
   stamina: number;
+  /** 會心機率（每次碰撞、每側獨立判定；效果 = 對方該次傷害 ×2 或 擊退 ×2） */
+  crit: number;
+  /** 必殺強度 s：必殺冷卻 ×(2−s)、rush/blast/clone 傷害 ×s */
+  specialPower: number;
   mass: number;
   radius: number;
   px: number;
@@ -227,8 +236,10 @@ export const XTREME_STADIUM: ArenaConfig = {
  * 弧壁競技場「ARC WALL STADIUM」內建場地（超橢圓邊界：方中帶弧、四邊外凸、四角出界）：
  *  - 邊界 r(θ) = radius·2^(1/p−1/2) / (|cosθ|^p + |sinθ|^p)^(1/p)，p = 3.5 → 四邊外凸弧形牆；
  *    對角正規化 → 最遠點（對角）恰為 radius，邊界恆在外接圓內（前端縮放不必改）。
- *  - 四個對角（45°/135°/225°/315°）= 出界扇區（rim pocket：出界門檻較低、飛出得 2 分），
+ *  - 四個對角（45°/135°/225°/315°）= 出界扇區（rim pocket：出界門檻較四邊低、飛出得 2 分），
  *    四邊中段門檻極高 → 幾乎必反彈 → 弧形牆把外滑的陀螺導向對角。
+ *  - 出界判定只發生在「貼上邊界 r(θ) 且沿法線外速超門檻」（resolveSuperellipseWall）——
+ *    內側任何位置都不可能觸發；hazard 視覺帶也畫在邊界外側（ArenaSvg），語意＝「飛越這道牆才出局」。
  *  - 幾何查詢共用 arena.ts 的 boundaryRadiusAt / boundaryNormalAt（畫面與物理同源、確定性）。
  * 給管理員選用的新場地（activeId 仍為 builtin-xtreme，不影響現役平衡）。
  */
@@ -240,13 +251,15 @@ export const ARC_WALL_STADIUM: ArenaConfig = {
   centerPull: 105,
   swirl: 95,
   wallBounce: 0.72,
-  // 四邊中段：門檻極高 → 幾乎必反彈；出界只能走對角扇區（rim 覆寫門檻 150）
+  // 四邊中段：門檻極高 → 幾乎必反彈；出界只能走對角扇區（rim 覆寫門檻 220）。
+  // 220 = 2026-06 實測校準（原 150 太鬆：正常繞行掠過對角就飛出）——隨機混型 400 場出界率
+  // 10.8% → 1.0%、攻型全力+blast 200 場 27% → 2.5%；「對角全力衝刺」（沿法線外速 ~600）仍穩定出界。
   ringOutSpeed: 420,
   rim: [
-    { angle: Math.PI / 4, half: 0.32, kind: "pocket", ringOutSpeed: 150, score: 2 },
-    { angle: (3 * Math.PI) / 4, half: 0.32, kind: "pocket", ringOutSpeed: 150, score: 2 },
-    { angle: (-3 * Math.PI) / 4, half: 0.32, kind: "pocket", ringOutSpeed: 150, score: 2 },
-    { angle: -Math.PI / 4, half: 0.32, kind: "pocket", ringOutSpeed: 150, score: 2 },
+    { angle: Math.PI / 4, half: 0.32, kind: "pocket", ringOutSpeed: 220, score: 2 },
+    { angle: (3 * Math.PI) / 4, half: 0.32, kind: "pocket", ringOutSpeed: 220, score: 2 },
+    { angle: (-3 * Math.PI) / 4, half: 0.32, kind: "pocket", ringOutSpeed: 220, score: 2 },
+    { angle: -Math.PI / 4, half: 0.32, kind: "pocket", ringOutSpeed: 220, score: 2 },
   ],
 };
 
@@ -345,9 +358,11 @@ function makeClone(owner: Body, sc: SpecialConfig): Body {
   return {
     id: owner.id + "~clone",
     color: owner.color,
-    attack: owner.attack * sc.cloneAttackMul,
+    attack: owner.attack * sc.cloneAttackMul * owner.specialPower, // 必殺強度：clone 傷害 ×s
     defense: owner.defense,
     stamina: owner.stamina,
+    crit: owner.crit,
+    specialPower: owner.specialPower,
     mass: Math.max(0.05, owner.mass * 0.6),
     radius: owner.radius * 0.8,
     px: owner.px,
@@ -397,6 +412,8 @@ export function simulate(inits: BeybladeInit[], config: SimConfig): SimResult {
     attack: b.stats.attack,
     defense: b.stats.defense,
     stamina: b.stats.stamina,
+    crit: b.stats.crit ?? DEFAULT_CRIT,
+    specialPower: b.stats.specialPower ?? DEFAULT_SPECIAL_POWER,
     mass: Math.max(0.05, b.stats.weight),
     radius: b.radius,
     px: b.position.x,
@@ -673,10 +690,15 @@ function resolveCollisions(
       const aRecv = clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4);
       const bRecv = clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4);
 
-      a.vx -= (jx / a.mass) * aRecv;
-      a.vy -= (jy / a.mass) * aRecv;
-      b.vx += (jx / b.mass) * bRecv;
-      b.vy += (jy / b.mass) * bRecv;
+      // 受擊側各自吃到的擊退速度變化先記下來（會心 "kb" 要在夾制後再補一份等量推力）
+      const aKbX = (jx / a.mass) * aRecv;
+      const aKbY = (jy / a.mass) * aRecv;
+      const bKbX = (jx / b.mass) * bRecv;
+      const bKbY = (jy / b.mass) * bRecv;
+      a.vx -= aKbX;
+      a.vy -= aKbY;
+      b.vx += bKbX;
+      b.vy += bKbY;
 
       // 能量夾制：碰撞後「分離速度」不得超過「接近速度」（等效反彈係數 ≤ 1）。
       // 防止 knockback × oppSpinBonus × 攻防 造成超彈性 → 邊緣連環撞越撞越快 → 噴出場外。
@@ -704,20 +726,55 @@ function resolveCollisions(
       // 加傷側全額、減傷側打折（split>0：a 進攻 → a 享折扣減傷、b 吃全額加傷；split<0 反之）
       const splitA = split > 0 ? split * AGGRESSOR_GUARD : split;
       const splitB = split > 0 ? split : split * AGGRESSOR_GUARD;
-      const dmgA = dmg * (1 - splitA) * softenRecv(clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4)) * (0.9 + rng() * 0.2);
-      const dmgB = dmg * (1 + splitB) * softenRecv(clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4)) * (0.9 + rng() * 0.2);
+      let dmgA = dmg * (1 - splitA) * softenRecv(clamp(b.attack / Math.max(0.2, a.defense), 0.2, 4)) * (0.9 + rng() * 0.2);
+      let dmgB = dmg * (1 + splitB) * softenRecv(clamp(a.attack / Math.max(0.2, b.defense), 0.2, 4)) * (0.9 + rng() * 0.2);
+      // 會心一擊：每次碰撞、每側獨立擲骰（機率 = 攻擊者的 crit），中了再擲 50/50 決定效果——
+      // "dmg"＝受擊側這份傷害 ×2（在 ±10% 浮動與 AGGRESSOR split 之後乘）；"kb"＝受擊側擊退 ×2（夾制後補推，見下）。
+      // rng 消耗固定每碰撞 4 次、順序固定（先判 A 被打、再判 B 被打；沒中也照樣消耗）→
+      // crit 參數不同不會位移 rng 流，同 seed 的 crit=0 對照組傷害基值逐位元相同（測試靠這點驗恰為 2x）。
+      const rollA = rng();
+      const effA: "dmg" | "kb" = rng() < 0.5 ? "dmg" : "kb";
+      const rollB = rng();
+      const effB: "dmg" | "kb" = rng() < 0.5 ? "dmg" : "kb";
+      const critA = rollA < b.crit ? effA : undefined; // A 被 B 會心打（事件記在受擊側欄位）
+      const critB = rollB < a.crit ? effB : undefined; // B 被 A 會心打
+      if (critA === "dmg") dmgA *= 2;
+      if (critB === "dmg") dmgB *= 2;
       a.hp -= dmgA;
       b.hp -= dmgB;
 
       // 接觸點（a 表面朝 b）→ 火花特效定位；只記「夠猛」的撞擊，避免摩擦微震洗版
       const cx = a.px + nx * a.radius;
       const cy = a.py + ny * a.radius;
-      if (impact > 25) collisionEvents.push({ t, x: cx, y: cy, impact, aId: a.id, bId: b.id, dmgA, dmgB });
+      if (impact > 25)
+        collisionEvents.push({
+          t,
+          x: cx,
+          y: cy,
+          impact,
+          aId: a.id,
+          bId: b.id,
+          dmgA,
+          dmgB,
+          ...(critA ? { critA } : {}),
+          ...(critB ? { critB } : {}),
+        });
 
       // 猛烈碰撞把雙方頂向空中（2.5D 彈跳）
       const pop = impact * arena.jumpPop * clash;
       a.vz += pop;
       b.vz += pop;
+
+      // 會心擊退（"kb"）：受擊側再吃一份等量擊退＝總擊退 ×2。
+      // 做成能量夾制「之後」的額外推力（比照 spinKnockback）——夾制前乘會被夾掉。
+      if (critA === "kb") {
+        a.vx -= aKbX;
+        a.vy -= aKbY;
+      }
+      if (critB === "kb") {
+        b.vx += bKbX;
+        b.vy += bKbY;
+      }
 
       // 轉速擊退加成（夾制之後的額外推力）：攻擊方自旋越高 → 把對手沿法線推得越遠。
       // 隨自旋衰減而遞減，所以不會像超彈性那樣無限暴衝；係數可在場地後台調。
@@ -738,8 +795,8 @@ function resolveCollisions(
         if (a.special === "blast" && b.alive && t >= a.specialReadyT && a.specialUsesLeft > 0 && rng() < sc.blastChance) {
           b.vx += nx * sc.blastPush;
           b.vy += ny * sc.blastPush;
-          b.hp -= sc.blastDamage;
-          a.specialReadyT = t + sc.blastCooldown;
+          b.hp -= sc.blastDamage * a.specialPower; // 必殺強度：傷害 ×s
+          a.specialReadyT = t + sc.blastCooldown * (2 - a.specialPower); // 冷卻 ×(2−s)
           a.specialUsesLeft -= 1;
           events.push({ t, id: a.id, kind: "blast", x: cx, y: cy });
         }
@@ -747,8 +804,8 @@ function resolveCollisions(
         if (b.special === "blast" && a.alive && t >= b.specialReadyT && b.specialUsesLeft > 0 && rng() < sc.blastChance) {
           a.vx -= nx * sc.blastPush;
           a.vy -= ny * sc.blastPush;
-          a.hp -= sc.blastDamage;
-          b.specialReadyT = t + sc.blastCooldown;
+          a.hp -= sc.blastDamage * b.specialPower; // 必殺強度：傷害 ×s
+          b.specialReadyT = t + sc.blastCooldown * (2 - b.specialPower); // 冷卻 ×(2−s)
           b.specialUsesLeft -= 1;
           events.push({ t, id: b.id, kind: "blast", x: cx, y: cy });
         }
@@ -831,8 +888,8 @@ function applySpecials(
           const d = Math.hypot(dx, dy) || 1e-6;
           b.vx += (dx / d) * sc.rushSpeed;
           b.vy += (dy / d) * sc.rushSpeed;
-          opp.hp -= sc.rushDamage;
-          b.specialReadyT = t + sc.rushCooldown;
+          opp.hp -= sc.rushDamage * b.specialPower; // 必殺強度：傷害 ×s
+          b.specialReadyT = t + sc.rushCooldown * (2 - b.specialPower); // 冷卻 ×(2−s)
           b.specialUsesLeft -= 1;
           events.push({ t, id: b.id, kind: "rush", x: b.px, y: b.py });
         } else {
@@ -844,19 +901,19 @@ function applySpecials(
       // 自旋偏低時觸發 → 回補自旋 + 回血（maxHp × dashHealFrac，夾制不超過 maxHp）+ 進入加速狀態
       const spinNorm = b.spin / DEFAULT_SCALES.maxSpin;
       if (ready && spinNorm < sc.dashTriggerSpin && rng() < sc.dashChance) {
-        b.spin += sc.dashSpinRestore;
+        b.spin += sc.dashSpinRestore; // 回轉/回血不吃必殺強度 s（避免過強）
         const heal = Math.max(0, Math.min(b.maxHp * sc.dashHealFrac, b.maxHp - b.hp));
         b.hp += heal;
         b.dashUntilT = t + sc.dashDuration;
-        b.specialReadyT = t + sc.dashCooldown;
+        b.specialReadyT = t + sc.dashCooldown * (2 - b.specialPower); // 冷卻 ×(2−s)
         b.specialUsesLeft -= 1;
         events.push({ t, id: b.id, kind: "dash", x: b.px, y: b.py, heal });
       }
     } else if (b.special === "vortex") {
       const inRange = opp !== null && best < sc.vortexRange;
       if (inRange && !b.prevInRange && ready && rng() < sc.vortexChance) {
-        b.vortexUntilT = t + sc.vortexDuration;
-        b.specialReadyT = t + sc.vortexCooldown;
+        b.vortexUntilT = t + sc.vortexDuration; // 吸轉/拉力不吃必殺強度 s（避免過強）
+        b.specialReadyT = t + sc.vortexCooldown * (2 - b.specialPower); // 冷卻 ×(2−s)
         b.specialUsesLeft -= 1;
         events.push({ t, id: b.id, kind: "vortex", x: b.px, y: b.py });
       }
@@ -876,13 +933,13 @@ function applySpecials(
           clone.z = 0;
           clone.vz = 0;
           clone.spin = sc.cloneSpin;
-          clone.attack = b.attack * sc.cloneAttackMul; // 依當前攻擊重算（低傷）
+          clone.attack = b.attack * sc.cloneAttackMul * b.specialPower; // 依當前攻擊重算（低傷）；必殺強度：傷害 ×s
           clone.angle = 0;
           clone.alive = true;
           clone.deadAtStep = -1;
           clone.deathReason = null;
           clone.cloneUntilT = t + sc.cloneDuration;
-          b.specialReadyT = t + sc.cloneCooldown;
+          b.specialReadyT = t + sc.cloneCooldown * (2 - b.specialPower); // 冷卻 ×(2−s)
           b.specialUsesLeft -= 1;
           events.push({ t, id: b.id, kind: "clone", x: b.px, y: b.py });
         }

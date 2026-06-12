@@ -718,8 +718,20 @@ export function useBattle(opts: UseBattleOptions = {}) {
     const m = c1.map((v, i) => Math.round(v + (c2[i] - v) * heat));
     return `rgb(${m[0]},${m[1]},${m[2]})`;
   }
-  /** 單顆浮動數字：上浮（ease-out）+ 末段淡出，深色描邊保可讀性（display 字感）。 */
-  function drawOnePop(g: CanvasRenderingContext2D, x: number, y: number, txt: string, color: string, fontPx: number, age: number, seed: number) {
+  /** 單顆浮動數字：上浮（ease-out）+ 末段淡出，深色描邊保可讀性（display 字感）。
+   *  gold=true → 會心配色：金黃 #ffd700 → 琥珀垂直漸層；prefix → 字上方加小字（如「會心」）。 */
+  function drawOnePop(
+    g: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    txt: string,
+    color: string,
+    fontPx: number,
+    age: number,
+    seed: number,
+    gold = false,
+    prefix = "",
+  ) {
     const p = age / DMG_POP_DUR;
     const ease = 1 - (1 - p) * (1 - p);
     const alpha = p < 0.55 ? 1 : Math.max(0, (1 - p) / 0.45);
@@ -730,8 +742,48 @@ export function useBattle(opts: UseBattleOptions = {}) {
     g.lineWidth = Math.max(3, fontPx * 0.16);
     g.strokeStyle = "rgba(5,8,13,0.85)";
     g.strokeText(txt, px, py);
-    g.fillStyle = color;
+    if (gold) {
+      const grad = g.createLinearGradient(0, py - fontPx * 0.55, 0, py + fontPx * 0.55);
+      grad.addColorStop(0, "#ffd700");
+      grad.addColorStop(1, "#ffb31f"); // --accent 琥珀
+      g.fillStyle = grad;
+    } else {
+      g.fillStyle = color;
+    }
     g.fillText(txt, px, py);
+    if (prefix) {
+      const sp = Math.max(11, Math.round(fontPx * 0.4));
+      g.font = `900 ${sp}px 'Noto Sans TC', sans-serif`;
+      g.lineWidth = Math.max(2, sp * 0.18);
+      g.strokeText(prefix, px, py - fontPx * 0.78);
+      g.fillStyle = "#ffd700";
+      g.fillText(prefix, px, py - fontPx * 0.78);
+    }
+  }
+  /* —— 會心 starburst：受擊點一圈金黃放射短線短閃（0.3s、8 道；確定性 hash 微旋） —— */
+  const CRIT_BURST_DUR = 0.3;
+  function drawCritBurst(g: CanvasRenderingContext2D, ex: number, ey: number, age: number, seed: number) {
+    const p = age / CRIT_BURST_DUR;
+    const fade = 1 - p;
+    g.save();
+    g.lineCap = "round";
+    g.globalCompositeOperation = "lighter";
+    const rot = hash01(seed * 7.7) * 0.5; // 每次事件整圈微旋，避免每發都同角度
+    const d0 = scaleLen(12 + 34 * p); // 由內向外擴
+    const len = scaleLen(6 + 12 * fade);
+    for (let i = 0; i < 8; i++) {
+      const ang = rot + (i / 8) * Math.PI * 2;
+      const c = Math.cos(ang);
+      const sn = Math.sin(ang);
+      g.globalAlpha = fade;
+      g.strokeStyle = i % 2 ? "#ffd700" : "#fff3d6"; // 金黃與白熱交錯
+      g.lineWidth = 1.6 + 1.8 * fade;
+      g.beginPath();
+      g.moveTo(ex + c * d0, ey + sn * d0);
+      g.lineTo(ex + c * (d0 + len), ey + sn * (d0 + len));
+      g.stroke();
+    }
+    g.restore();
   }
   /** 傷害/回血數字層（最上層）：位置取「事件當下」幀的陀螺座標（數字釘在受擊點上方）。 */
   function drawDamagePops(g: CanvasRenderingContext2D, curT: number, frames: Frame[]) {
@@ -746,20 +798,34 @@ export function useBattle(opts: UseBattleOptions = {}) {
       const age = curT - ce.t;
       if (age < 0 || age >= DMG_POP_DUR) continue;
       const fb = frames[Math.min(frames.length - 1, Math.round(ce.t * 60))];
-      const pops: [string | undefined, number | undefined][] = [
-        [ce.aId, ce.dmgA],
-        [ce.bId, ce.dmgB],
+      // 會心（任一側）：受擊點先閃一圈金黃 starburst（dmg/kb 兩種效果都閃）
+      if ((ce.critA || ce.critB) && age < CRIT_BURST_DUR) {
+        const [ex, ey] = toCanvas(ce.x, ce.y);
+        drawCritBurst(g, ex, ey, age, k);
+      }
+      const pops: [string | undefined, number | undefined, "dmg" | "kb" | undefined][] = [
+        [ce.aId, ce.dmgA, ce.critA],
+        [ce.bId, ce.dmgB, ce.critB],
       ];
       for (let pi = 0; pi < 2; pi++) {
-        const [id, dmg] = pops[pi];
-        if (!id || dmg == null || dmg < thr) continue; // 舊回放資料無傷害欄位 → 不彈
-        const n = Math.round(dmg);
-        if (n < 1) continue;
+        const [id, dmg, crit] = pops[pi];
+        if (!id) continue;
         const body = fb.bodies.find((x) => x.id === id);
         if (!body) continue;
-        const heat = Math.min(1, dmg / Math.max(1, avg * 2.2)); // 平均的 2.2 倍 → 全紅最大字
         const [bx, by] = toCanvas(body.x, body.y);
-        drawOnePop(g, bx, by, `-${n}`, dmgColor(heat), Math.round(17 + 17 * heat), age, k * 2 + pi);
+        // 會心擊飛：受擊陀螺位置彈金黃「擊飛!」短字（與傷害數字 seed 錯開、不疊字）
+        if (crit === "kb") drawOnePop(g, bx, by, "擊飛!", "#ffd700", 20, age, k * 2 + pi + 211, true);
+        // 會心傷害一律彈（×2 後通常過門檻；保險起見不吃門檻）；一般傷害低於門檻不彈避免洗版
+        if (dmg == null || (dmg < thr && crit !== "dmg")) continue; // 舊回放資料無傷害欄位 → 不彈
+        const n = Math.round(dmg);
+        if (n < 1) continue;
+        const heat = Math.min(1, dmg / Math.max(1, avg * 2.2)); // 平均的 2.2 倍 → 全紅最大字
+        if (crit === "dmg") {
+          // 會心傷害：金黃→琥珀漸層、字級 ×1.35、上方「會心」小字
+          drawOnePop(g, bx, by, `-${n}`, "#ffd700", Math.round((17 + 17 * heat) * 1.35), age, k * 2 + pi, true, "會心");
+        } else {
+          drawOnePop(g, bx, by, `-${n}`, dmgColor(heat), Math.round(17 + 17 * heat), age, k * 2 + pi);
+        }
       }
     }
     // dash 回血：綠色「+N」（--ok）

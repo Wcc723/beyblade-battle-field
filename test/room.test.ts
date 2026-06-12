@@ -10,6 +10,7 @@ import {
   type AimInput,
 } from "../src/game/room";
 import { roundPoints, WIN_SCORE } from "../src/game/scoring";
+import { BEYBLADES, getBey, resolveBeyStats } from "../src/game/beyblades";
 import { DEFAULT_ARENA, DEFAULT_SCALES, simulate } from "../src/physics/engine";
 import { STAT_PRESETS } from "../src/physics/presets";
 import type { ArenaConfig } from "../src/physics/types";
@@ -45,7 +46,12 @@ describe("sanitizeAim（伺服器端發射消毒）", () => {
 describe("buildInitFromAim（與前端 makeInit 同公式）", () => {
   it("速度/自旋依 power 換算、id 與顏色固定", () => {
     const aim: AimInput = { x: 10, y: 20, dirX: 0, dirY: -1, power: 0.5 };
-    const init = buildInitFromAim("B", { type: "attack", spinDir: -1, special: "blast" }, STAT_PRESETS.attack, aim);
+    const init = buildInitFromAim(
+      "B",
+      { beyId: "scarlet-blaze-wheel", spinDir: -1, special: "blast" },
+      STAT_PRESETS.attack,
+      aim,
+    );
     expect(init.id).toBe("B");
     expect(init.velocity.y).toBeCloseTo(-0.5 * DEFAULT_SCALES.maxSpeed);
     expect(init.spin).toBeCloseTo((0.55 + 0.45 * 0.5) * DEFAULT_SCALES.maxSpin);
@@ -56,11 +62,26 @@ describe("buildInitFromAim（與前端 makeInit 同公式）", () => {
   it("special 空字串 → undefined（不裝必殺）", () => {
     const init = buildInitFromAim(
       "A",
-      { type: "balance", spinDir: 1, special: "" },
+      { beyId: "celestial-pivot-quake", spinDir: 1, special: "" },
       STAT_PRESETS.balance,
       defaultAim("A", arena),
     );
     expect(init.special).toBeUndefined();
+  });
+
+  it("配 resolveBeyStats：名冊個體差/crit/specialPower 進到 init.stats（DO 端組裝路徑）", () => {
+    const bey = getBey("prison-steel-saw")!; // 反擊之盾：attack 1.06 / defense 0.96
+    const stats = resolveBeyStats(bey, STAT_PRESETS.defense);
+    const init = buildInitFromAim(
+      "A",
+      { beyId: bey.id, spinDir: 1, special: "" },
+      stats,
+      defaultAim("A", arena),
+    );
+    expect(init.stats.attack).toBeCloseTo(STAT_PRESETS.defense.attack * 1.06);
+    expect(init.stats.defense).toBeCloseTo(STAT_PRESETS.defense.defense * 0.96);
+    expect(init.stats.crit).toBe(bey.crit);
+    expect(init.stats.specialPower).toBe(bey.specialPower);
   });
 });
 
@@ -69,10 +90,22 @@ describe("defaultAim（瞄準逾時自動發射）", () => {
     const a = defaultAim("A", arena);
     const b = defaultAim("B", arena);
     expect(Math.hypot(a.x, a.y)).toBeLessThan(arena.radius);
+    const balanceBey = getBey("celestial-pivot-quake")!;
+    const attackBey = getBey("scarlet-blaze-wheel")!;
     const r = simulate(
       [
-        buildInitFromAim("A", { type: "balance", spinDir: 1, special: "" }, STAT_PRESETS.balance, a),
-        buildInitFromAim("B", { type: "attack", spinDir: -1, special: "" }, STAT_PRESETS.attack, b),
+        buildInitFromAim(
+          "A",
+          { beyId: balanceBey.id, spinDir: 1, special: "" },
+          resolveBeyStats(balanceBey, STAT_PRESETS.balance),
+          a,
+        ),
+        buildInitFromAim(
+          "B",
+          { beyId: attackBey.id, spinDir: -1, special: "" },
+          resolveBeyStats(attackBey, STAT_PRESETS.attack),
+          b,
+        ),
       ],
       { dt: 1 / 60, maxTime: 60, arena, seed: 42, sampleEvery: 100000 },
     );
@@ -83,18 +116,25 @@ describe("defaultAim（瞄準逾時自動發射）", () => {
 });
 
 describe("mergeLoadout（client 配置更新驗證）", () => {
-  const base = { type: "balance", spinDir: 1 as const, special: "" as const };
-  it("合法更新生效", () => {
-    const next = mergeLoadout(base, { type: "attack", spinDir: -1, special: "clone" }, Object.keys(STAT_PRESETS));
-    expect(next).toEqual({ type: "attack", spinDir: -1, special: "clone" });
+  // allowed 清單＝玩家自己的 lineup beyId（不是全名冊——只能在自己帶的 3 顆裡換）
+  const allowed = ["scarlet-blaze-wheel", "abyss-heavy-armor", "frost-fang-orbit"];
+  const base = { beyId: "scarlet-blaze-wheel", spinDir: 1 as const, special: "" as const };
+  it("合法更新生效（beyId 在 allowed 清單內）", () => {
+    const next = mergeLoadout(base, { beyId: "abyss-heavy-armor", spinDir: -1, special: "clone" }, allowed);
+    expect(next).toEqual({ beyId: "abyss-heavy-armor", spinDir: -1, special: "clone" });
   });
-  it("非法值整段忽略（type 不在清單 / spinDir 亂給 / special 亂給）", () => {
+  it("非法值整段忽略（beyId 不在清單 / spinDir 亂給 / special 亂給）", () => {
     const next = mergeLoadout(
       base,
-      { type: "god-mode", spinDir: 99 as unknown as 1, special: "nuke" as unknown as "" },
-      Object.keys(STAT_PRESETS),
+      { beyId: "god-mode", spinDir: 99 as unknown as 1, special: "nuke" as unknown as "" },
+      allowed,
     );
     expect(next).toEqual(base);
+  });
+  it("名冊內但不在自己 lineup 的 beyId 一樣擋掉（不能偷拿沒帶的陀螺）", () => {
+    const next = mergeLoadout(base, { beyId: "violet-thunder-blade" }, allowed);
+    expect(next.beyId).toBe("scarlet-blaze-wheel");
+    expect(BEYBLADES.some((bb) => bb.id === "violet-thunder-blade")).toBe(true); // 確認真的在名冊裡
   });
 });
 
@@ -127,11 +167,11 @@ describe("內建 BOT（randomBotAim / randomBotLoadout）", () => {
     }
   });
 
-  it("loadout 隨機值都合法", () => {
-    const types = Object.keys(STAT_PRESETS);
+  it("loadout 隨機值都合法（beyId 出自名冊）", () => {
+    const ids = BEYBLADES.map((b) => b.id);
     for (const v of [0, 0.3, 0.6, 0.999]) {
-      const l = randomBotLoadout(types, () => v);
-      expect(types).toContain(l.type);
+      const l = randomBotLoadout(() => v);
+      expect(ids).toContain(l.beyId);
       expect([1, -1]).toContain(l.spinDir);
       expect(["", "rush", "blast", "dash", "vortex", "clone"]).toContain(l.special);
     }

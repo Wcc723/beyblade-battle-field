@@ -3,8 +3,9 @@
  *  - 幾何：r(θ) 對角正規化（對角 = radius、四邊中段內縮）、法線為單位向量。
  *  - 確定性：同輸入同 seed → 完全一致的 frames。
  *  - 邊界反彈不穿牆：多 seed 隨機對戰，存活陀螺恆在 r(θ) 邊界內（含容差）。
- *  - 對角扇區可出界（rim pocket 門檻低）→ ring-out、roundPoints = 2。
+ *  - 對角扇區可出界（rim pocket 門檻 220，較四邊 420 低）→ ring-out、roundPoints = 2。
  *  - 四邊中段門檻極高 → 反彈牆（中速衝牆不出界）。
+ *  - 出界只發生在「貼上邊界且外速超門檻」：中速貼著對角繞行不出界（迴歸，原門檻 150 太鬆）。
  */
 import { describe, it, expect } from "vitest";
 import { simulate, buildInit, ARC_WALL_STADIUM } from "../src/physics/engine";
@@ -113,7 +114,7 @@ describe("弧壁競技場：邊界反彈不穿牆", () => {
 describe("弧壁競技場：對角出界扇區", () => {
   it("高速衝向對角（45°）→ ring-out、落點在 2 分扇區、roundPoints = 2", () => {
     const inits = [
-      // A 朝 45 度對角猛衝（沿法線向外速 ≈ 700 > 扇區門檻 150）。
+      // A 朝 45 度對角猛衝（沿法線向外速 ≈ 600+ > 扇區門檻 220）。
       // spin 用 3000（spinNorm = 1）：spin 過大時 swirl ∝ spinNorm 會產生巨大切向力、毀掉定向。
       body({ id: "A", velocity: { x: 500, y: 500 }, spin: 3000 }),
       // B 遠離戰場、高續航 → 不會先停轉
@@ -131,6 +132,18 @@ describe("弧壁競技場：對角出界扇區", () => {
     expect(roundPoints(ARENA, r)).toBe(2);
   });
 
+  it("中速衝向對角（45°）→ 反彈、不出界（迴歸：原門檻 150 此速度會直接飛出）", () => {
+    // 對角初速 440：實測分水嶺——舊門檻 150 出界、新門檻 220 反彈；480+ 新舊皆出界
+    // （上一個測試的 707 全力衝刺即是）→「輕碰/中速不出、被強力擊飛才出」。
+    const vc = 440 / Math.SQRT2;
+    const inits = [
+      body({ id: "A", velocity: { x: vc, y: vc }, spin: 3000 }),
+      body({ id: "B", position: { x: -120, y: -120 }, spin: 3000, stats: { attack: 1, defense: 1, stamina: 5, weight: 1 } }),
+    ];
+    const r = simulate(inits, { dt: 1 / 60, maxTime: 3, arena: ARENA, seed: 7 });
+    expect(r.reason).not.toBe("ring-out");
+  });
+
   it("中速衝向四邊中段（0°）→ 門檻極高必反彈、不出界", () => {
     const inits = [
       body({ id: "A", velocity: { x: 400, y: 0 }, spin: 3000 }),
@@ -146,5 +159,38 @@ describe("弧壁競技場：對角出界扇區", () => {
         expect(dist).toBeLessThanOrEqual(boundaryRadiusAt(ARENA, Math.atan2(bf.y, bf.x)) - 20 + 0.01);
       }
     }
+  });
+
+  it("中速貼著對角繞行 → 不出界（迴歸：原門檻 150 時繞行掠過 pocket 就飛出）", () => {
+    // A 貼牆起步（θ=0、距弧壁 6 單位）、切向中速 280 逆時針繞行 → 路徑會貼牆滑過 45° pocket。
+    // 繞行/輕碰的沿法線外速遠低於門檻 220 → 只該反彈導向、不該出界。
+    const theta0 = 0;
+    const r0 = boundaryRadiusAt(ARENA, theta0) - 20 - 6;
+    const inits = [
+      body({
+        id: "A",
+        position: { x: r0 * Math.cos(theta0), y: r0 * Math.sin(theta0) },
+        velocity: { x: 0, y: 280 }, // 切向（逆時針，與 spinDir +1 的 swirl 同向）
+        spin: 3000,
+      }),
+      // B 擺場中央、高續航 → 不參與碰撞、也不會先停轉
+      body({ id: "B", position: { x: 0, y: 0 }, spin: 3000, stats: { attack: 1, defense: 1, stamina: 5, weight: 1 } }),
+    ];
+    const r = simulate(inits, { dt: 1 / 60, maxTime: 4, arena: ARENA, seed: 11 });
+    expect(r.reason).not.toBe("ring-out");
+    // 確認測試非空泛：A 確實曾「貼著牆」通過對角 pocket 扇區（中心 45°、半寬 0.32）
+    let passedPocket = false;
+    for (const f of r.frames) {
+      for (const bf of f.bodies) {
+        if (bf.id !== "A" || !bf.alive) continue;
+        const dist = Math.hypot(bf.x, bf.y);
+        const ang = Math.atan2(bf.y, bf.x);
+        const bound = boundaryRadiusAt(ARENA, ang);
+        // 全程不穿牆
+        expect(dist).toBeLessThanOrEqual(bound - 20 + 0.01);
+        if (Math.abs(ang - Math.PI / 4) <= 0.32 && dist >= bound - 80) passedPocket = true;
+      }
+    }
+    expect(passedPocket).toBe(true);
   });
 });

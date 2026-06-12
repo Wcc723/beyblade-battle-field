@@ -32,7 +32,8 @@ function neutralArena(overrides: Partial<ArenaConfig> = {}): ArenaConfig {
 function body(over: Partial<BeybladeInit> & { id: string }): BeybladeInit {
   return {
     color: "#fff",
-    stats: { attack: 1, defense: 1, stamina: 1, weight: 1 },
+    // crit: 0 —— 本檔驗的是「±10% 浮動是唯一傷害不對稱來源」的語意（會心另測於 crit.test.ts）
+    stats: { attack: 1, defense: 1, stamina: 1, weight: 1, crit: 0 },
     position: { x: 0, y: 0 },
     velocity: { x: 0, y: 0 },
     spin: 1000,

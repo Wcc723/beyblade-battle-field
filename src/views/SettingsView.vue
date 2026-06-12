@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from "vue";
+import { RouterLink } from "vue-router";
 import { useAuth } from "../store/authStore";
-import { PRESET_LABELS } from "../physics/presets";
 import BbIcon from "../components/ui/BbIcon.vue";
 
 const auth = useAuth();
@@ -14,16 +14,9 @@ interface UserSettings {
   launchMode: string;
   sfx: boolean;
   replaySpeed: number;
+  /** 出賽陣容（編輯入口在 /roster；PUT 全量必須帶回，缺了 worker 會重設成預設陣容） */
+  lineup?: { beyId: string; special: string }[];
 }
-
-const SPECIAL_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "（無）" },
-  { value: "rush", label: "衝刺突進" },
-  { value: "blast", label: "衝擊" },
-  { value: "dash", label: "高速移動" },
-  { value: "vortex", label: "旋渦" },
-  { value: "clone", label: "分身" },
-];
 
 const form = reactive<UserSettings>({
   nickname: "",
@@ -136,26 +129,14 @@ async function save() {
         </label>
         <p class="hint">未改名前使用系統指派的代號，隨時可以改成自己的名字。</p>
 
-        <div class="f-label sect"><BbIcon name="lightning" :size="13" />預設陀螺配置（進房自動套用）</div>
-        <div class="grid2">
-          <label class="row">
-            <span class="row-label">類型</span>
-            <span class="f-select">
-              <select v-model="form.defaultType">
-                <option v-for="(label, key) in PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
-              </select>
-            </span>
-          </label>
-          <label class="row">
-            <span class="row-label">必殺技</span>
-            <span class="f-select">
-              <select v-model="form.defaultSpecial">
-                <option v-for="o in SPECIAL_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-              </select>
-            </span>
-          </label>
-        </div>
-        <p class="hint">旋向由房間決定：先手（紅）固定右旋、後手（藍）固定左旋——保證每場反向對撞。</p>
+        <div class="f-label sect"><BbIcon name="lightning" :size="13" />出賽陣容</div>
+        <RouterLink class="roster-link" to="/roster">
+          <span class="roster-txt">
+            <b>出賽陣容已搬到陀螺庫</b>
+            <i>挑選 3 顆出賽陀螺與必殺技</i>
+          </span>
+          <BbIcon name="arrow-right" :size="18" />
+        </RouterLink>
 
         <div class="f-label sect"><BbIcon name="controller" :size="13" />操作偏好</div>
         <div class="grid2">
@@ -348,6 +329,47 @@ async function save() {
 }
 .row.check .bb-icon {
   color: var(--accent);
+}
+/* ---- 出賽陣容入口卡（導向 /roster） ---- */
+.roster-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: var(--text);
+  background:
+    linear-gradient(90deg, rgba(255, 122, 24, 0.12), transparent 60%),
+    linear-gradient(180deg, #171a21, #10131a);
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+  box-shadow: inset 0 0 0 1px rgba(255, 179, 31, 0.18);
+  transition: box-shadow 0.15s;
+}
+.roster-link:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 179, 31, 0.45);
+}
+.roster-link .bb-icon {
+  flex: none;
+  color: var(--accent);
+}
+.roster-txt {
+  flex: 1;
+  min-width: 0;
+}
+.roster-txt b {
+  display: block;
+  font-family: var(--f-d);
+  font-weight: 800;
+  font-size: 14.5px;
+  letter-spacing: 0.08em;
+}
+.roster-txt i {
+  display: block;
+  font-style: normal;
+  margin-top: 2px;
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  color: var(--muted);
 }
 /* ---- 低調鋼板提示小字 ---- */
 .hint {

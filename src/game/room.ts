@@ -8,6 +8,7 @@
  */
 import type { ArenaConfig, BeybladeInit, BeybladeStats, SpecialConfig, SpecialKind, WinReason } from "../physics/types";
 import { DEFAULT_SCALES } from "../physics/engine";
+import { BEYBLADES } from "./beyblades";
 
 export type Side = "A" | "B";
 export const SIDE_COLORS: Record<Side, string> = { A: "#e8442e", B: "#2e9fe8" };
@@ -23,7 +24,7 @@ export function sideSpinDir(side: Side): 1 | -1 {
 
 /** 玩家配置（伺服器端真相；client 的 loadout 訊息只能改這個） */
 export interface PlayerLoadout {
-  type: string; // attack | defense | stamina | balance（驗證時對 stats keys）
+  beyId: string; // 名冊 id（src/game/beyblades.ts；type/數值由伺服器經 roster 推導，不進協定）
   spinDir: 1 | -1;
   special: "" | SpecialKind;
 }
@@ -71,7 +72,9 @@ export interface RoomSnapshot {
   /** 瞄準截止（unix ms；伺服器 alarm 到點自動發射） */
   aimDeadline?: number;
   winnerSide?: Side;
+  /** 本場 match 的場地（隨機池抽出、整場固定）：前端顯示用 */
   arenaName?: string;
+  arenaId?: string;
 }
 
 export interface RoundOutcome {
@@ -191,24 +194,25 @@ export function randomBotAim(side: Side, arena: ArenaConfig, rng: () => number =
   };
 }
 
-/** BOT 每回合隨機配置（類型/旋向/必殺技） */
-export function randomBotLoadout(validTypes: string[], rng: () => number = Math.random): PlayerLoadout {
+/** BOT 每回合隨機配置（從全名冊抽 beyId；旋向/必殺技隨機） */
+export function randomBotLoadout(rng: () => number = Math.random): PlayerLoadout {
   const specials: PlayerLoadout["special"][] = ["", "rush", "blast", "dash", "vortex", "clone"];
+  const bey = BEYBLADES[Math.floor(rng() * BEYBLADES.length)] ?? BEYBLADES[0];
   return {
-    type: validTypes[Math.floor(rng() * validTypes.length)] ?? "balance",
+    beyId: bey.id,
     spinDir: rng() < 0.5 ? 1 : -1,
     special: specials[Math.floor(rng() * specials.length)] ?? "",
   };
 }
 
-/** 驗證 loadout 部分更新（type 對照合法 keys；非法欄位忽略） */
+/** 驗證 loadout 部分更新（beyId 必須在 allowed 清單＝玩家自己的 lineup；非法欄位忽略） */
 export function mergeLoadout(
   current: PlayerLoadout,
   patch: Partial<PlayerLoadout>,
-  validTypes: string[],
+  allowedBeyIds: string[],
 ): PlayerLoadout {
   const next = { ...current };
-  if (typeof patch.type === "string" && validTypes.includes(patch.type)) next.type = patch.type;
+  if (typeof patch.beyId === "string" && allowedBeyIds.includes(patch.beyId)) next.beyId = patch.beyId;
   if (patch.spinDir === 1 || patch.spinDir === -1) next.spinDir = patch.spinDir;
   if (
     patch.special === "" ||

@@ -48,6 +48,7 @@ const initial = computed(() => {
       <!-- 桌機水平導覽：一般玩家只有大廳/個人設定，測試與後台入口僅管理員可見 -->
       <nav class="top-nav">
         <RouterLink to="/">大廳</RouterLink>
+        <RouterLink to="/roster">陀螺庫</RouterLink>
         <RouterLink to="/settings">個人設定</RouterLink>
         <template v-if="auth.isAdmin.value">
           <RouterLink to="/test/battle">測試對戰</RouterLink>
@@ -85,6 +86,10 @@ const initial = computed(() => {
     <RouterLink to="/" class="tab" :class="{ on: route.name === 'lobby' }">
       <BbIcon name="house" :size="20" />
       <span>大廳</span>
+    </RouterLink>
+    <RouterLink to="/roster" class="tab" :class="{ on: route.name === 'roster' }">
+      <BbIcon name="shield" :size="20" />
+      <span>陀螺</span>
     </RouterLink>
     <RouterLink to="/settings" class="tab" :class="{ on: route.name === 'settings' }">
       <BbIcon name="person" :size="20" />
@@ -260,7 +265,7 @@ const initial = computed(() => {
   bottom: 0;
   z-index: 50;
   display: none;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 2px;
   padding: 10px 14px calc(9px + env(safe-area-inset-bottom));
   background: linear-gradient(180deg, #262b34, #15181e 45%, #0d0f14);

@@ -74,8 +74,10 @@ const superG = computed(() => {
   // 邊界路徑：吃「引擎用的同一份」r(θ)（sampleBoundary）→ 畫面與物理同源
   const pts = sampleBoundary(props.arena, 288);
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${toSvgWorld(p.x, p.y)}`).join(" ") + " Z";
-  // 出界扇區（rim，弧壁場為四個對角 pocket）：沿邊界取樣的帶狀 hazard 區 + 計分標籤
-  const bandW = 30; // hazard 帶寬（world 單位）
+  // 出界扇區（rim，弧壁場為四個對角 pocket）：沿邊界「外側」取樣的帶狀 hazard 區 + 計分標籤。
+  // 帶畫在邊界外（boundary → boundary+bandW）＝「飛越這道牆才出局」——場內任何位置都不會
+  // 觸發出界（物理同此語意，見 resolveSuperellipseWall），別再畫內側帶誤導玩家「碰到就出局」。
+  const bandW = 25; // hazard 帶寬（world 單位）；外擴後仍在畫布內（對角最遠 = radius，PAD=28 有餘裕）
   const exits = effectiveRim(props.arena)
     .map((seg) => {
       const rp = rimAt(props.arena, seg.angle);
@@ -85,10 +87,11 @@ const superG = computed(() => {
       for (let i = 0; i <= N; i++) {
         const a = seg.angle - seg.half + (i / N) * seg.half * 2;
         const r = boundaryRadiusAt(props.arena, a);
-        outer.push(svgPt(r * Math.cos(a), r * Math.sin(a)));
-        inner.unshift(svgPt((r - bandW) * Math.cos(a), (r - bandW) * Math.sin(a)));
+        outer.push(svgPt((r + bandW) * Math.cos(a), (r + bandW) * Math.sin(a)));
+        inner.unshift(svgPt(r * Math.cos(a), r * Math.sin(a)));
       }
-      const rl = boundaryRadiusAt(props.arena, seg.angle) - bandW - 20;
+      // 計分標籤放外側帶中線
+      const rl = boundaryRadiusAt(props.arena, seg.angle) + bandW / 2;
       return {
         pts: [...outer, ...inner].join(" "),
         lx: C + rl * Math.cos(seg.angle) * scale.value,

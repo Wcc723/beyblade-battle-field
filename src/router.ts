@@ -5,6 +5,7 @@ import { useAuth } from "./store/authStore";
  * 路由規劃（線上對戰版）：
  * - /            大廳（找人 / 線上人數 / 房號加入）— 需登入
  * - /room/:code  對戰廳（以手機版為基準）— 需登入
+ * - /roster      陀螺庫（出賽陣容 + 全名冊六維雷達）— 需登入
  * - /settings    個人設定 — 需登入
  * - /admin/*     管理員後台 — 需登入 + ADMIN_EMAILS（後端 /api/admin/* 才是真閘門）
  * - /login       Google 登入
@@ -18,6 +19,12 @@ export const router = createRouter({
       path: "/room/:code",
       name: "room",
       component: () => import("./views/BattleRoomView.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/roster",
+      name: "roster",
+      component: () => import("./views/RosterView.vue"),
       meta: { requiresAuth: true },
     },
     {

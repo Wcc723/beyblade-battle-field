@@ -5,8 +5,7 @@ import ArenaSvg from "../components/ArenaSvg.vue";
 import BbIcon from "../components/ui/BbIcon.vue";
 import { useBattle } from "../composables/useBattle";
 import { useOnlineBattle } from "../composables/useOnlineBattle";
-import { beybladeName } from "../game/names";
-import { BOT_UID } from "../game/room";
+import { beyFullName, DEFAULT_LINEUP, getBey } from "../game/beyblades";
 import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../physics/types";
 
 const route = useRoute();
@@ -18,7 +17,7 @@ const bt = useBattle({ defaultLaunchMode: "sling", onLaunchSubmit: (aim) => onli
 online.bind(bt);
 
 const {
-  arena, setupA, setupB, presetKeys, PRESET_LABELS,
+  arena, setupA, setupB,
   phase, launchMode, hintText,
   result, playhead, playing, speed, slowmo,
   canvas, shakeEl, SIZE, dragging, powerPct,
@@ -54,12 +53,29 @@ async function loadServerConfig(attempt = 0): Promise<void> {
   }
 }
 
+// 自己的出賽陣容（D1 user_settings.lineup）：抽屜「出賽陀螺」選單的選項來源。
+// 失敗回落 DEFAULT_LINEUP（與 DO readLineup 同一套 fallback → 選項至少與伺服器一致）。
+const myLineup = ref<{ beyId: string; special: string }[]>([...DEFAULT_LINEUP]);
+let lineupRetry: ReturnType<typeof setTimeout> | undefined;
+async function loadMyLineup(attempt = 0): Promise<void> {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { settings: { lineup?: { beyId: string; special: string }[] } };
+    if (data.settings.lineup?.length) myLineup.value = data.settings.lineup;
+  } catch {
+    if (attempt < 5) lineupRetry = setTimeout(() => loadMyLineup(attempt + 1), 1000 * 2 ** attempt);
+  }
+}
+
 onMounted(() => {
   online.connect();
   void loadServerConfig();
+  void loadMyLineup();
 });
 onBeforeUnmount(() => {
   clearTimeout(configRetry);
+  clearTimeout(lineupRetry);
   clearTimeout(spBannerTimer);
   clearTimeout(tapArmTimer);
   online.dispose();
@@ -75,21 +91,31 @@ const waitingOpponent = computed(() => !snap.value || snap.value.phase === "wait
 const showAimPanel = computed(() => isAiming.value && !online.myLaunched.value && phase.value !== "playing");
 const replayDone = computed(() => bt.isFinished());
 
-/* ---------- 陀螺名（uid+type 穩定 hash）：自己側吃本地 setup → 改類型即時跟著變 ---------- */
-function sideType(side: "A" | "B"): string {
-  if (side === mySide.value) return (side === "B" ? setupB : setupA).preset;
-  return snap.value?.players[side]?.loadout.type ?? "balance";
+/* ---------- 出賽陀螺（名冊制）：名字來自 getBey(beyId) 的 beyFullName ----------
+   自己側吃本地 selectedBeyId（切換選單即時跟著變、不等伺服器 echo）；對手側吃 snapshot。 */
+// 抽屜選單目前選的 beyId：預設跟 snapshot（DO 依出賽順序排定的那顆），伺服器 echo 會再同步回來
+const selectedBeyId = ref("");
+watch(
+  () => online.me.value?.loadout.beyId,
+  (v) => {
+    if (v) selectedBeyId.value = v;
+  },
+  { immediate: true },
+);
+/** beyId → 全名「{名}-{類型中文}」；查無（roster 改版孤兒 id）回 "—" 不炸 */
+function beyLabel(beyId: string | undefined): string {
+  const bey = beyId ? getBey(beyId) : undefined;
+  return bey ? beyFullName(bey) : "—";
 }
 function sideBlade(side: "A" | "B"): string {
+  if (side === mySide.value && selectedBeyId.value) return beyLabel(selectedBeyId.value);
   const p = snap.value?.players[side];
-  if (!p) return "";
-  return beybladeName(p.isBot ? BOT_UID : p.uid, sideType(side));
+  return p ? beyLabel(p.loadout.beyId) : "";
 }
-const typeA = computed(() => sideType("A"));
-const typeB = computed(() => sideType("B"));
 const bladeA = computed(() => sideBlade("A"));
 const bladeB = computed(() => sideBlade("B"));
 const myBlade = computed(() => (mySide.value ? sideBlade(mySide.value) : ""));
+const oppBlade = computed(() => beyLabel(online.opponent.value?.loadout.beyId));
 
 /* ---------- 底部抽屜（配置收進 bottom sheet；純 UI 狀態，不碰瞄準/WS 邏輯） ---------- */
 const sheetOpen = ref(false);
@@ -207,9 +233,10 @@ function copyCode() {
   }
 }
 
-/* 自己的配置變更 → 送伺服器（伺服器 echo 會再同步回 setups） */
-function onTypeChange() {
-  online.sendLoadout({ type: mySetup.value.preset });
+/* 自己的配置變更 → 送伺服器（伺服器 echo 會再同步回 setups）
+   出賽陀螺只送 beyId：type/數值由 DO 經名冊推導，非自己 lineup 內的 id 會被忽略 */
+function onBeyChange() {
+  if (selectedBeyId.value) online.sendLoadout({ beyId: selectedBeyId.value });
 }
 function onSpecialChange() {
   online.sendLoadout({ special: mySetup.value.special });
@@ -231,7 +258,7 @@ function onSpecialChange() {
               <span v-if="snap?.players.A && !snap.players.A.connected" class="f-badge f-badge--red">離線</span>
             </div>
             <div v-if="snap?.players.A" class="np-sub">
-              <span class="np-blade">{{ bladeA }}・{{ PRESET_LABELS[typeA] ?? typeA }}</span>
+              <span class="np-blade">{{ bladeA }}</span>
               <span class="chip">先手・右旋</span>
             </div>
           </div>
@@ -279,7 +306,7 @@ function onSpecialChange() {
               <span v-if="snap?.players.B && !snap.players.B.connected" class="f-badge f-badge--red">離線</span>
             </div>
             <div v-if="snap?.players.B" class="np-sub">
-              <span class="np-blade">{{ bladeB }}・{{ PRESET_LABELS[typeB] ?? typeB }}</span>
+              <span class="np-blade">{{ bladeB }}</span>
               <span class="chip">後手・左旋</span>
             </div>
           </div>
@@ -399,7 +426,6 @@ function onSpecialChange() {
       <button type="button" class="loadout-bar" :class="mySide === 'B' ? 'is-blue' : 'is-red'" @click="sheetOpen = true">
         <span class="pulse"></span>
         <strong class="lb-blade">{{ myBlade || "—" }}</strong>
-        <span class="f-badge" :class="mySide === 'B' ? 'f-badge--blue' : 'f-badge--red'">{{ PRESET_LABELS[mySetup.preset] }}</span>
         <span class="lb-sp">{{ mySetup.special ? SPECIAL_NAMES[mySetup.special] : "無必殺技" }}</span>
         <span v-if="online.opponentJustLaunched.value" class="f-badge f-badge--amber">對手已發射</span>
         <BbIcon name="arrow-right" :size="14" class="lb-chev" />
@@ -444,7 +470,7 @@ function onSpecialChange() {
     <!-- 底部（音效/離開收成低調角落鍵） -->
     <div class="foot">
       <span class="foot-code">#{{ code }}</span>
-      <span class="foot-arena">場地：{{ snap?.arenaName ?? bt.arenaName.value }}</span>
+      <span class="foot-arena">場地：{{ online.matchArena.value?.name ?? bt.arenaName.value }}</span>
       <button class="cornerbtn" :aria-label="sfxEnabled ? '關閉音效' : '開啟音效'" @click="sfxEnabled = !sfxEnabled">
         <BbIcon :name="sfxEnabled ? 'volume-up' : 'volume-mute'" :size="14" />
       </button>
@@ -468,16 +494,14 @@ function onSpecialChange() {
             <div class="vs-row">
               <span class="vs-en">VS</span>
               <span class="vs-name">{{ online.opponent.value?.nickname ?? "—" }}</span>
-              <span class="f-badge" :class="mySide === 'B' ? 'f-badge--red' : 'f-badge--blue'">
-                {{ PRESET_LABELS[online.opponent.value?.loadout.type ?? "balance"] }}
-              </span>
+              <span class="f-badge" :class="mySide === 'B' ? 'f-badge--red' : 'f-badge--blue'">{{ oppBlade }}</span>
             </div>
             <div class="grid2">
               <div>
-                <span class="f-label">機體類型</span>
+                <span class="f-label">出賽陀螺</span>
                 <span class="f-select">
-                  <select v-model="mySetup.preset" @change="onTypeChange">
-                    <option v-for="k in presetKeys" :key="k" :value="k">{{ PRESET_LABELS[k] }}</option>
+                  <select v-model="selectedBeyId" @change="onBeyChange">
+                    <option v-for="(e, i) in myLineup" :key="e.beyId" :value="e.beyId">{{ i + 1 }} 號機・{{ beyLabel(e.beyId) }}</option>
                   </select>
                 </span>
               </div>

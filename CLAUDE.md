@@ -83,6 +83,15 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 
 線上化雷區：worker 端被單元測試 import 的模組（`session.ts`/`jwt.ts`）必須**零 `Env` 全域型別相依**（root tsconfig 沒有 workers runtime 型別）；OAuth callback 是整頁導航，**失敗一律 302 回 `/login?error=<code>`** 不可回裸 JSON；JWT/任何 base64 的 UTF-8 內容不能 `JSON.parse(atob(...))`（中文會亂碼）。
 
+## 陀螺名冊（roster）
+
+`src/game/beyblades.ts`（零 Env/DOM，worker 與前端共用）＝固定角色名冊：10 顆 `BeyDef`（id/name/type/mods/crit/specialPower），顯示名 `beyFullName()`＝「赤霄焚輪-攻擊型」。**id+name 有凍結鎖**（test/beyblades.test.ts checksum 44f8b176——數值可調、名字永固，動名單要原位替換+更新 checksum）。個體差設計：mods 0.92~1.08 乘在類型基礎上（admin 調類型基礎仍全面生效）、crit 0.03~0.08、specialPower 0.9~1.2、無全維度優勢顆。
+
+- **會心**：碰撞時攻擊者 `crit`（預設 0.05）機率觸發，50/50 出「傷害 ×2」或「擊退 ×2（夾制後補推）」；`CollisionEvent.critA/critB`（記在受擊側）；**每碰撞固定消耗 4 次 rng**（沒中也消耗→調 crit 不位移 rng 流）。前端金黃數字+放射閃光。
+- **specialPower**：必殺冷卻 ×(2−s)、rush/blast/clone 傷害 ×s；dash 回血/vortex 不吃 s。
+- **lineup**：玩家選 3 顆出賽（`user_settings.lineup` JSON，migration 0005；空→`DEFAULT_LINEUP`）；選秀介面 `/roster`（RosterView+RadarHex 六維雷達：攻/防/續航/重量/會心/必殺）。線上協定 `Loadout={beyId,spinDir,special}`，DO 以 `getBey→resolveBeyStats` 組裝防竄改；**按順序出賽**＝round N 預設 lineup[(N-1)%len]、手動切換僅當回合有效。
+- **場地隨機池**：arena config `enabledIds`（後台勾選、缺→[activeId]）；DO 每場 match 開打時抽一座存 `matchArena`、整場固定、rematch 重抽。
+
 ## 必殺技
 
 五招、opt-in（每顆獨立裝備）、seeded 機率觸發、**不影響基礎平衡**（平衡工具不裝必殺技）；設計上**裝技明顯強於不裝**（刻意，鏡像實測 dash ~74%/rush ~71% 勝率）：

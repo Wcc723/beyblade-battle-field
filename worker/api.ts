@@ -17,6 +17,7 @@ import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../src/physics/t
 import { DEFAULT_ARENA, XTREME_STADIUM, ARC_WALL_STADIUM, DEFAULT_SPECIAL } from "../src/physics/engine";
 import { STAT_PRESETS } from "../src/physics/presets";
 import { autoNickname } from "../src/game/names";
+import { getBey, DEFAULT_LINEUP } from "../src/game/beyblades";
 
 export const CONFIG_KEYS = ["arena", "stats", "special"] as const;
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -55,27 +56,43 @@ async function readConfig(env: Env, key: ConfigKey): Promise<unknown> {
   }
 }
 
-/** Battle Room DO 用：取「目前線上對戰生效」的整組設定（active 場地 + 屬性 + 必殺技）。 */
+/** Battle Room DO 用：取「目前線上對戰生效」的整組設定（場地隨機池 + 屬性 + 必殺技）。 */
 export interface GameConfig {
+  /** 向後相容：池中第一座（單場地時＝active 場地） */
   arena: ArenaConfig;
   arenaName: string;
+  /** 場地隨機池（enabledIds 解析後；缺/全失效 → fallback [activeId]）：DO 每場 match 抽一座 */
+  arenas: { id: string; name: string; config: ArenaConfig }[];
   stats: Record<string, BeybladeStats>;
   special: SpecialConfig;
 }
 
 export async function readGameConfig(env: Env): Promise<GameConfig> {
   const [arenaVal, stats, special] = await Promise.all([
-    readConfig(env, "arena") as Promise<{ presets: { id: string; name: string; config: ArenaConfig }[]; activeId: string }>,
+    readConfig(env, "arena") as Promise<{
+      presets: { id: string; name: string; config: ArenaConfig }[];
+      activeId: string;
+      enabledIds?: unknown;
+    }>,
     readConfig(env, "stats") as Promise<Record<string, BeybladeStats>>,
     readConfig(env, "special") as Promise<SpecialConfig>,
   ]);
-  const preset = arenaVal.presets.find((p) => p.id === arenaVal.activeId) ?? arenaVal.presets[0];
+  const active = arenaVal.presets.find((p) => p.id === arenaVal.activeId) ?? arenaVal.presets[0];
+  // 隨機池：enabledIds 對回 presets（未知 id 靜默丟棄）；缺欄/解析後空 → 單場地 [activeId]
+  const enabled = Array.isArray(arenaVal.enabledIds)
+    ? arenaVal.enabledIds
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => arenaVal.presets.find((p) => p.id === id))
+        .filter((p): p is NonNullable<typeof p> => !!p)
+    : [];
+  const pool = enabled.length > 0 ? enabled : [active];
   // stats / special 鋪程式碼預設底（D1 blob 缺欄位不會讓模擬吃到 undefined）
   const mergedStats: Record<string, BeybladeStats> = {};
   for (const [k, v] of Object.entries(STAT_PRESETS)) mergedStats[k] = { ...v, ...(stats[k] ?? {}) };
   return {
-    arena: { ...preset.config },
-    arenaName: preset.name,
+    arena: { ...pool[0].config },
+    arenaName: pool[0].name,
+    arenas: pool.map((p) => ({ id: p.id, name: p.name, config: { ...p.config } })),
     stats: mergedStats,
     special: { ...DEFAULT_SPECIAL, ...special },
   };
@@ -94,8 +111,8 @@ export async function handleGetConfig(env: Env): Promise<Response> {
 function isValidConfigValue(key: ConfigKey, value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
   if (key === "arena") {
-    const v = value as { presets?: unknown; activeId?: unknown };
-    return (
+    const v = value as { presets?: unknown; activeId?: unknown; enabledIds?: unknown };
+    const presetsOk =
       Array.isArray(v.presets) &&
       v.presets.length > 0 &&
       v.presets.every(
@@ -106,8 +123,15 @@ function isValidConfigValue(key: ConfigKey, value: unknown): boolean {
           typeof (p as { name?: unknown }).name === "string" &&
           typeof (p as { config?: unknown }).config === "object",
       ) &&
-      typeof v.activeId === "string"
-    );
+      typeof v.activeId === "string";
+    if (!presetsOk) return false;
+    // enabledIds（場地隨機池）：可選；給了就必須是 string[]，且至少 1 個存在於 presets
+    if (v.enabledIds !== undefined) {
+      if (!Array.isArray(v.enabledIds) || !v.enabledIds.every((id) => typeof id === "string")) return false;
+      const ids = new Set((v.presets as { id: string }[]).map((p) => p.id));
+      if (!v.enabledIds.some((id) => ids.has(id as string))) return false;
+    }
+    return true;
   }
   return true; // stats / special：物件即可（欄位由前端 UI 控制）
 }
@@ -136,6 +160,12 @@ export async function handlePutAdminConfig(request: Request, env: Env, key: stri
 
 // --- 個人設定 ---
 
+/** 出賽陣容單格（user_settings.lineup JSON / Battle Room DO 共用形狀） */
+export interface LineupEntry {
+  beyId: string;
+  special: string;
+}
+
 export interface UserSettings {
   nickname: string;
   defaultType: string;
@@ -144,6 +174,7 @@ export interface UserSettings {
   launchMode: string;
   sfx: boolean;
   replaySpeed: number;
+  lineup: LineupEntry[];
 }
 
 const TYPES = ["attack", "defense", "stamina", "balance"];
@@ -151,9 +182,68 @@ const SPINS = ["right", "left"];
 const SPECIALS = ["", "rush", "blast", "dash", "vortex", "clone"];
 const LAUNCH_MODES = ["flick", "sling"];
 
+/**
+ * 讀取側消毒（嚴格）：D1 NULL / 壞 JSON / 空陣列 / 超過 3 格 /
+ * 任一格未知 beyId・非法 special・重複 beyId → 整包回 DEFAULT_LINEUP。
+ * （寫入側已驗證過，這裡擋的是手改 DB / roster 改版後的孤兒 id）
+ */
+function parseLineup(raw: string | null | undefined): LineupEntry[] {
+  if (!raw) return [...DEFAULT_LINEUP];
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr) || arr.length === 0 || arr.length > 3) return [...DEFAULT_LINEUP];
+    const seen = new Set<string>();
+    const out: LineupEntry[] = [];
+    for (const e of arr) {
+      const beyId = (e as { beyId?: unknown } | null)?.beyId;
+      const special = (e as { special?: unknown } | null)?.special ?? "";
+      if (typeof beyId !== "string" || !getBey(beyId) || seen.has(beyId)) return [...DEFAULT_LINEUP];
+      if (typeof special !== "string" || !SPECIALS.includes(special)) return [...DEFAULT_LINEUP];
+      seen.add(beyId);
+      out.push({ beyId, special });
+    }
+    return out;
+  } catch {
+    return [...DEFAULT_LINEUP];
+  }
+}
+
+/**
+ * 寫入側消毒（寬鬆）：丟掉未知 beyId / 重複 beyId 的格子、special 非法降為 ""、
+ * 至多取 3 格；結果為空（含 body 非陣列）→ 存 DEFAULT_LINEUP。
+ */
+function sanitizeLineupInput(value: unknown): LineupEntry[] {
+  if (!Array.isArray(value)) return [...DEFAULT_LINEUP];
+  const seen = new Set<string>();
+  const out: LineupEntry[] = [];
+  for (const e of value) {
+    if (out.length >= 3) break;
+    const beyId = (e as { beyId?: unknown } | null)?.beyId;
+    const rawSpecial = (e as { special?: unknown } | null)?.special ?? "";
+    if (typeof beyId !== "string" || !getBey(beyId) || seen.has(beyId)) continue;
+    const special = typeof rawSpecial === "string" && SPECIALS.includes(rawSpecial) ? rawSpecial : "";
+    seen.add(beyId);
+    out.push({ beyId, special });
+  }
+  return out.length > 0 ? out : [...DEFAULT_LINEUP];
+}
+
+/** Battle Room DO 用：讀玩家出賽陣容（查無 / 壞資料 / D1 失敗 → DEFAULT_LINEUP，永不丟例外） */
+export async function readLineup(env: Env, uid: number): Promise<LineupEntry[]> {
+  try {
+    const row = await env.DB.prepare("SELECT lineup FROM user_settings WHERE user_id = ?1")
+      .bind(uid)
+      .first<{ lineup: string | null }>();
+    return parseLineup(row?.lineup);
+  } catch (err) {
+    console.error("lineup read failed", err);
+    return [...DEFAULT_LINEUP];
+  }
+}
+
 export async function handleGetSettings(env: Env, session: SessionData): Promise<Response> {
   const row = await env.DB.prepare(
-    `SELECT nickname, default_type, default_spin, default_special, launch_mode, sfx, replay_speed
+    `SELECT nickname, default_type, default_spin, default_special, launch_mode, sfx, replay_speed, lineup
      FROM user_settings WHERE user_id = ?1`,
   )
     .bind(session.uid)
@@ -165,6 +255,7 @@ export async function handleGetSettings(env: Env, session: SessionData): Promise
       launch_mode: string;
       sfx: number;
       replay_speed: number;
+      lineup: string | null;
     }>();
   // 暱稱為空（新用戶或從未改名）→ 指派系統代號並持久化寫回：之後回傳的 nickname 永遠非空
   let nickname = (row?.nickname ?? "").trim();
@@ -195,6 +286,7 @@ export async function handleGetSettings(env: Env, session: SessionData): Promise
         launchMode: row.launch_mode,
         sfx: !!row.sfx,
         replaySpeed: row.replay_speed,
+        lineup: parseLineup(row.lineup),
       }
     : {
         nickname,
@@ -204,6 +296,7 @@ export async function handleGetSettings(env: Env, session: SessionData): Promise
         launchMode: "sling",
         sfx: true,
         replaySpeed: 2,
+        lineup: [...DEFAULT_LINEUP],
       };
   return Response.json({ settings, user: { email: session.email, name: session.name, picture: session.picture } });
 }
@@ -266,12 +359,13 @@ export async function handlePutSettings(request: Request, env: Env, session: Ses
   const launchMode = LAUNCH_MODES.includes(body.launchMode as string) ? (body.launchMode as string) : "sling";
   const sfx = body.sfx === undefined ? true : !!body.sfx;
   const replaySpeed = [1, 2, 3].includes(Number(body.replaySpeed)) ? Number(body.replaySpeed) : 2;
+  const lineup = sanitizeLineupInput(body.lineup);
   if (!nickname) return Response.json({ error: "nickname_required" }, { status: 400 });
 
   try {
     await env.DB.prepare(
-      `INSERT INTO user_settings (user_id, nickname, default_type, default_spin, default_special, launch_mode, sfx, replay_speed, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+      `INSERT INTO user_settings (user_id, nickname, default_type, default_spin, default_special, launch_mode, sfx, replay_speed, lineup, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))
        ON CONFLICT(user_id) DO UPDATE SET
          nickname = excluded.nickname,
          default_type = excluded.default_type,
@@ -280,9 +374,10 @@ export async function handlePutSettings(request: Request, env: Env, session: Ses
          launch_mode = excluded.launch_mode,
          sfx = excluded.sfx,
          replay_speed = excluded.replay_speed,
+         lineup = excluded.lineup,
          updated_at = excluded.updated_at`,
     )
-      .bind(session.uid, nickname, defaultType, defaultSpin, defaultSpecial, launchMode, sfx ? 1 : 0, replaySpeed)
+      .bind(session.uid, nickname, defaultType, defaultSpin, defaultSpecial, launchMode, sfx ? 1 : 0, replaySpeed, JSON.stringify(lineup))
       .run();
   } catch (err) {
     // session 指向已刪除的 user（FK 失敗）→ 視為 session 失效，不是伺服器錯誤

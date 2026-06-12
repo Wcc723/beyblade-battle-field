@@ -17,6 +17,17 @@ export interface ArenaPreset {
   userEdited?: boolean;
 }
 
+/**
+ * 線上(D1) arena config blob 形狀（/api/config 讀、後台 PUT 整包寫；與 worker readGameConfig 同規則）。
+ * enabledIds＝線上對戰場地隨機池（每場 match 從中隨機選一場）；可選，缺 → fallback [activeId]。
+ * 本機 localStorage（測試頁、單場地概念）不使用 enabledIds。
+ */
+export interface ArenaConfigBlob {
+  presets: ArenaPreset[];
+  activeId: string;
+  enabledIds?: string[];
+}
+
 const KEY = "beyblade.arenas.v1";
 const ACTIVE_KEY = "beyblade.activeArena.v1";
 

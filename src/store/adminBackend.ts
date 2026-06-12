@@ -9,7 +9,7 @@ import { reactive, ref, type Ref } from "vue";
 import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../physics/types";
 import { DEFAULT_SPECIAL } from "../physics/engine";
 import { STAT_PRESETS } from "../physics/presets";
-import type { ArenaPreset } from "./arenaStore";
+import type { ArenaConfigBlob, ArenaPreset } from "./arenaStore";
 import * as localArena from "./arenaStore";
 import { stats as localStats, persistStats, resetStat, resetAllStats } from "./statStore";
 import { special as localSpecial, persistSpecial, resetSpecial } from "./specialStore";
@@ -24,6 +24,13 @@ export interface ArenaStoreApi {
   removePreset(id: string): Promise<void>;
   setActive(id: string): Promise<void>;
   resetBuiltin(id: string): Promise<void>;
+  /**
+   * 遠端版才有：線上對戰場地隨機池（每場 match 從已啟用場地隨機選一場）。
+   * local（測試頁、單場地概念）不提供 → 後台 UI 以此判斷要不要渲染「線上啟用」勾選。
+   */
+  enabledIds?: Ref<string[]>;
+  /** 遠端版才有：切換某場地是否加入隨機池。池至少保留一場——最後一場的取消會被忽略（UI disable 之外的第二道防線）。 */
+  setEnabled?(id: string, on: boolean): Promise<void>;
   /** 遠端版才有：重新從伺服器載入（載入失敗的重試、寫入失敗後的重新同步） */
   reload?: () => Promise<void>;
 }
@@ -141,6 +148,7 @@ function uid(): string {
 export function createRemoteArenaApi(): ArenaStoreApi {
   const presets = ref<ArenaPreset[]>([]);
   const activeId = ref("");
+  const enabledIds = ref<string[]>([]);
   const ready = ref(false);
   const error = ref("");
 
@@ -148,9 +156,13 @@ export function createRemoteArenaApi(): ArenaStoreApi {
     try {
       const res = await fetch("/api/config");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { arena: { presets: ArenaPreset[]; activeId: string } };
+      const data = (await res.json()) as { arena: ArenaConfigBlob };
       presets.value = data.arena.presets;
       activeId.value = data.arena.activeId;
+      // 隨機池：剔除已不存在的場地 id；缺欄/剔到空 → fallback [activeId]（與 worker readGameConfig 同規則）
+      const valid = (data.arena.enabledIds ?? []).filter((id) => data.arena.presets.some((p) => p.id === id));
+      const fallback = data.arena.activeId || data.arena.presets[0]?.id;
+      enabledIds.value = valid.length > 0 ? valid : fallback ? [fallback] : [];
       ready.value = true;
       error.value = "";
     } catch (e) {
@@ -164,7 +176,8 @@ export function createRemoteArenaApi(): ArenaStoreApi {
   let queue: Promise<void> = Promise.resolve();
   function push(): Promise<void> {
     queue = queue.then(async () => {
-      const ok = await putAdminConfig("arena", { presets: presets.value, activeId: activeId.value }, error);
+      const body: ArenaConfigBlob = { presets: presets.value, activeId: activeId.value, enabledIds: enabledIds.value };
+      const ok = await putAdminConfig("arena", body, error);
       if (!ok) await load();
     });
     return queue;
@@ -175,8 +188,20 @@ export function createRemoteArenaApi(): ArenaStoreApi {
   return {
     presets,
     activeId,
+    enabledIds,
     ready,
     error,
+    async setEnabled(id, on) {
+      if (on) {
+        if (enabledIds.value.includes(id) || !presets.value.some((p) => p.id === id)) return; // 已啟用 / 未知 id：不打 API
+        enabledIds.value = [...enabledIds.value, id];
+      } else {
+        if (!enabledIds.value.includes(id)) return;
+        if (enabledIds.value.length <= 1) return; // 最後一場不可取消（UI disable 之外的第二道防線）
+        enabledIds.value = enabledIds.value.filter((x) => x !== id);
+      }
+      await push();
+    },
     async addPreset(name, config) {
       const preset: ArenaPreset = { id: uid(), name: name.trim() || "未命名場地", config: { ...config } };
       presets.value.push(preset);
@@ -195,6 +220,9 @@ export function createRemoteArenaApi(): ArenaStoreApi {
     async removePreset(id) {
       presets.value = presets.value.filter((x) => x.id !== id);
       if (activeId.value === id) activeId.value = presets.value[0]?.id ?? "";
+      // 隨機池同步剔除被刪場地；剔到空 → 回落 [activeId]（池至少一場，也避免 PUT 被 server 驗證擋下）
+      enabledIds.value = enabledIds.value.filter((x) => x !== id);
+      if (enabledIds.value.length === 0 && activeId.value) enabledIds.value = [activeId.value];
       await push();
     },
     async setActive(id) {

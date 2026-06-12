@@ -36,7 +36,9 @@ import {
   type Side,
 } from "../src/game/room";
 import { autoNickname } from "../src/game/names";
-import { readGameConfig, type GameConfig } from "./api";
+import { BEYBLADES, getBey, resolveBeyStats, DEFAULT_LINEUP } from "../src/game/beyblades";
+import type { ArenaConfig, SpecialKind } from "../src/physics/types";
+import { readGameConfig, readLineup, type GameConfig, type LineupEntry } from "./api";
 
 const AIM_MS = 45_000; // 瞄準時限（到點自動以預設參數發射）
 const IDLE_CLEANUP_MS = 10 * 60_000; // 全員離線後清房
@@ -50,6 +52,10 @@ interface StoredPlayer {
   picture: string;
   loadout: PlayerLoadout;
   isBot?: boolean;
+  /** 出賽陣容（join 時讀 D1、本局凍結）：按順序出賽的輪替表＋in-battle 切換的 allowed 清單 */
+  lineup?: LineupEntry[];
+  /** 本回合手動切換過陀螺（記回合號）：startAiming 套陣容順序時跳過、只影響當回合 */
+  pickedRound?: number;
 }
 
 interface StoredRoom {
@@ -69,8 +75,11 @@ interface StoredRoom {
   idleSince?: number;
   /** 最後一回合的重跑包：重連/錯過廣播的玩家補發（review/finished 時 join 重送） */
   lastRound?: RoundPayload;
-  /** 本回合凍結的全域設定：消毒/預設發射/模擬同一份基準（管理員回合中調參不影響進行中回合） */
+  /** 本回合凍結的全域設定：消毒/預設發射/模擬同一份基準（管理員回合中調參不影響進行中回合）。
+   *  注意：arena 欄位在 startAiming 已換成 matchArena 的場地（整場 match 同一座）。 */
   roundCfg?: GameConfig;
+  /** 本場 match 的場地：round 1 startAiming 時從啟用池隨機抽一座、整場固定（rematch 清掉重抽） */
+  matchArena?: { id: string; name: string; config: ArenaConfig };
 }
 
 interface WsAttachment {
@@ -78,12 +87,14 @@ interface WsAttachment {
   side: Side;
 }
 
-/** join 時 worker 路由塞進來的使用者資訊（已驗證 session 後的內部信任 header） */
+/** join 時 worker 路由塞進來的使用者資訊（已驗證 session 後的內部信任 header）。
+ *  loadout 仍是舊版「個人設定預設」形狀（type/spinDir/special）：lineup 制下 DO 不再採用
+ *  （實際出賽配置由 D1 lineup 決定），保留欄位讓 worker 路由免改、wire 相容。 */
 export interface JoinUser {
   uid: number;
   nickname: string;
   picture: string;
-  loadout: PlayerLoadout;
+  loadout: { type: string; spinDir: 1 | -1; special: "" | SpecialKind };
 }
 
 function freshRoom(): StoredRoom {
@@ -175,17 +186,28 @@ export class BattleRoomDO extends DurableObject<Env> {
     // 暱稱保險：上游取到空值（user_settings 空白等）→ fallback 系統代號（只顯示用，不寫 DB）
     const nickname = (user.nickname ?? "").trim() || autoNickname(user.uid);
     const existing = room.players[side];
-    room.players[side] = existing?.uid === user.uid
-      ? { ...existing, nickname, picture: user.picture } // 重連：保留本局 loadout
-      : {
-          uid: user.uid,
-          nickname,
-          picture: user.picture,
-          // 旋向固定：先手 A 右旋、後手 B 左旋（個人設定的預設旋向在線上無效）
-          loadout: { ...user.loadout, spinDir: sideSpinDir(side) },
-        };
+    if (existing?.uid === user.uid) {
+      // 重連：保留本局 loadout / lineup（陣容本場凍結，輪替順序不被中途改設定打亂）
+      room.players[side] = { ...existing, nickname, picture: user.picture };
+    } else {
+      // 新入座：讀玩家出賽陣容（D1 失敗/壞資料 → DEFAULT_LINEUP），第一棒先上場
+      // （這裡在 run() 串列裡 await D1 是安全的——所有改狀態事件都排同一條 chain）
+      const lineup = await readLineup(this.env, user.uid);
+      room.players[side] = {
+        uid: user.uid,
+        nickname,
+        picture: user.picture,
+        lineup,
+        // 旋向固定：先手 A 右旋、後手 B 左旋（個人設定的預設旋向在線上無效）
+        loadout: {
+          beyId: lineup[0].beyId,
+          spinDir: sideSpinDir(side),
+          special: lineup[0].special as PlayerLoadout["special"],
+        },
+      };
+    }
 
-    // BOT 房：另一側還空著 → 讓內建 AI 入座
+    // BOT 房：另一側還空著 → 讓內建 AI 入座（配置 startAiming 每回合重抽，這裡先佔位）
     if (wantBot) {
       const other: Side = side === "A" ? "B" : "A";
       if (!room.players[other]) {
@@ -193,7 +215,7 @@ export class BattleRoomDO extends DurableObject<Env> {
           uid: BOT_UID,
           nickname: BOT_NICKNAME,
           picture: "",
-          loadout: { type: "balance", spinDir: 1, special: "" },
+          loadout: { ...randomBotLoadout(), spinDir: sideSpinDir(other) },
           isBot: true,
         };
         room.botSide = other;
@@ -243,11 +265,15 @@ export class BattleRoomDO extends DurableObject<Env> {
 
     switch (msg.type) {
       case "loadout": {
-        // 發射前都可改配置（waiting / aiming 未發射）
+        // 發射前都可改配置（waiting / aiming 未發射）；beyId 只能在自己的 lineup 內挑
         if ((room.phase === "waiting" || room.phase === "aiming") && !room.aims[att.side]) {
-          const cfg = room.roundCfg ?? (await this.gameConfig());
-          me.loadout = mergeLoadout(me.loadout, msg.loadout ?? {}, Object.keys(cfg.stats));
+          const allowed = (me.lineup?.length ? me.lineup : DEFAULT_LINEUP).map((e) => e.beyId);
+          me.loadout = mergeLoadout(me.loadout, msg.loadout ?? {}, allowed);
           me.loadout.spinDir = sideSpinDir(att.side); // 旋向固定，client 改不動
+          // 手動切換陀螺只影響當回合：記回合號，startAiming 套陣容輪替時跳過這位玩家
+          if (typeof msg.loadout?.beyId === "string" && allowed.includes(msg.loadout.beyId)) {
+            me.pickedRound = room.roundNum;
+          }
           await this.saveRoom(room);
           await this.broadcastRoom(room);
         }
@@ -285,6 +311,11 @@ export class BattleRoomDO extends DurableObject<Env> {
         room.scoreB = 0;
         room.roundNum = 1;
         room.winnerSide = undefined;
+        room.matchArena = undefined; // 新一場 match → 場地池重抽
+        for (const s of ["A", "B"] as const) {
+          const p = room.players[s];
+          if (p) p.pickedRound = undefined; // 上一場的手動切換紀錄不可帶進新 match 的 round 1
+        }
         await this.startAiming(room);
         await this.saveRoom(room);
         await this.broadcastRoom(room);
@@ -344,13 +375,31 @@ export class BattleRoomDO extends DurableObject<Env> {
     room.phase = "aiming";
     room.aims = {};
     room.aimDeadline = Date.now() + AIM_MS;
-    // 凍結本回合的全域設定：消毒/預設發射/模擬同一份基準
-    room.roundCfg = await this.gameConfig();
+    const cfg = await this.gameConfig();
+    // 場地隨機池：match 開始（round 1 / rematch 清空後）從啟用池抽一座、整場 match 固定。
+    // DO 層用真亂數沒問題——場地選擇不進引擎，確定性重跑不受影響。
+    if (!room.matchArena) {
+      const pool = cfg.arenas;
+      const idx = crypto.getRandomValues(new Uint32Array(1))[0] % pool.length;
+      room.matchArena = { id: pool[idx].id, name: pool[idx].name, config: { ...pool[idx].config } };
+    }
+    // 凍結本回合的全域設定：消毒/預設發射/模擬同一份基準；
+    // arena 換成 matchArena → 下游（sanitizeAim/defaultAim/simulate/重跑包）全吃同一座場地
+    room.roundCfg = { ...cfg, arena: { ...room.matchArena.config }, arenaName: room.matchArena.name };
+    // 按順序出賽：本回合沒手動切換的玩家 → 陣容第 (roundNum-1) % len 棒上場（special 跟著陣容格）
+    for (const s of ["A", "B"] as const) {
+      const p = room.players[s];
+      if (!p || p.isBot || p.pickedRound === room.roundNum) continue;
+      const lineup = p.lineup?.length ? p.lineup : DEFAULT_LINEUP;
+      const entry = lineup[(room.roundNum - 1) % lineup.length];
+      p.loadout.beyId = entry.beyId;
+      p.loadout.special = entry.special as PlayerLoadout["special"];
+    }
     // BOT：每回合隨機配置 + 開局即提交隱藏 aim（不洩漏——aims 從不廣播，
     // 玩家只看得到 launched=✓；零計時器、hibernation 也不怕）
     const bot = room.botSide ? room.players[room.botSide] : undefined;
     if (room.botSide && bot?.isBot) {
-      bot.loadout = { ...randomBotLoadout(Object.keys(room.roundCfg.stats)), spinDir: sideSpinDir(room.botSide) };
+      bot.loadout = { ...randomBotLoadout(), spinDir: sideSpinDir(room.botSide) };
       const aim = sanitizeAim(randomBotAim(room.botSide, room.roundCfg.arena), room.roundCfg.arena);
       room.aims[room.botSide] = aim ?? defaultAim(room.botSide, room.roundCfg.arena);
     }
@@ -363,8 +412,10 @@ export class BattleRoomDO extends DurableObject<Env> {
     const sides: Side[] = ["A", "B"];
     const inits = sides.map((s) => {
       const p = room.players[s]!;
-      const stats = cfg.stats[p.loadout.type] ?? cfg.stats.balance;
-      return buildInitFromAim(s, p.loadout, stats, room.aims[s]!);
+      // beyId → 名冊個體差 × 類型基礎屬性（client 只送 beyId/special，數值全由伺服器組裝 → 防竄改）
+      const bey = getBey(p.loadout.beyId) ?? BEYBLADES[0];
+      const base = cfg.stats[bey.type] ?? cfg.stats.balance;
+      return buildInitFromAim(s, p.loadout, resolveBeyStats(bey, base), room.aims[s]!);
     });
     // seed：雙方提交後才產生（防離線暴搜）
     const seed = crypto.getRandomValues(new Uint32Array(1))[0];
@@ -485,6 +536,7 @@ export class BattleRoomDO extends DurableObject<Env> {
       aimDeadline: room.aimDeadline,
       winnerSide: room.winnerSide,
       arenaName,
+      arenaId: room.matchArena?.id,
     };
   }
 
@@ -502,11 +554,14 @@ export class BattleRoomDO extends DurableObject<Env> {
 
   /** 房間快照逐連線送（每人帶自己的 side） */
   private async broadcastRoom(room: StoredRoom): Promise<void> {
-    let arenaName: string | undefined;
-    try {
-      arenaName = (await this.gameConfig()).arenaName;
-    } catch {
-      /* 設定讀取失敗不擋廣播 */
+    // match 已抽場地 → 用 matchArena（整場固定）；還沒開打（waiting）才退回全域設定的名字
+    let arenaName: string | undefined = room.matchArena?.name;
+    if (!arenaName) {
+      try {
+        arenaName = (await this.gameConfig()).arenaName;
+      } catch {
+        /* 設定讀取失敗不擋廣播 */
+      }
     }
     const snapshot = this.snapshotOf(room, arenaName);
     for (const ws of this.ctx.getWebSockets()) {
