@@ -109,7 +109,7 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 
 現行校準（2026-06 第四輪定案＝時長重校）：**平均戰局 26s／中位 31s（目標 20~30s、hpBase 1150 防開場秒殺）**；勝負原因 **ko ~57% / spin-out ~23% / ring-out ~15.5% / draw ~4.7%**；四類型勝率 48.9~51.7（帶寬 40~60）；猜拳三角 53~57。必殺裝備勝率 rush 64 / clone 64 / dash 62 / vortex 62 / blast 51（全 >50）。注意事項：
 
-- 碰撞傷害 **±10% seeded 浮動**（dmgA/dmgB 獨立擲骰）+ **速度主導傷害分配**（`AGGRESSOR_DMG_SPLIT`：衝得快的進攻方少吃、被撞方多吃，impact 90~220 線性淡入）——兩者合力把雙 KO 從 25.9% 壓到 4.5%。
+- 碰撞傷害 **±10% seeded 浮動**（dmgA/dmgB 獨立擲骰）+ **速度主導傷害分配**（`AGGRESSOR_DMG_SPLIT`：衝得快的進攻方少吃、被撞方多吃，impact 75~185 線性淡入）——兩者合力把雙 KO 從 25.9% 壓到 4.5%。
 - **`defense.attack` 是刀口參數**：atk-def 對局對它極度敏感（±0.03 可大幅擺動勝率），動它必重跑 balance。
 - 各勝負原因比例在不同 seed 有 ±1.5pp 取樣噪音，勿對單一 seed 過度擬合。
 - **D1 `global_config` 會蓋過程式碼預設**：重校後要同步線上值（migration 0004/0006 清除舊 blob 回落新預設；之後再重校記得比照處理——beys 個體覆寫為差異值可保留）。`defaultConfigValue` 的 arena `activeId` 預設必須是 `builtin-xtreme`（清 blob 後若回落圓形場＝正式站默默換場）。
@@ -137,3 +137,17 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 - **碰撞能量夾制**：`resolveCollisions` 把碰撞後分離速度夾到 ≤ 接近速度（防超彈性無限暴衝）。需要「比彈性更強的擊退」（如 `spinKnockback`、blast）要做成**夾制之後的額外推力**，否則會被夾掉。
 - **Vue DOM 更新是非同步的**：用瀏覽器自動化/JS 改了狀態後，別在同一個同步區塊讀 DOM（會讀到舊值）；改用截圖或 `nextTick`。
 - 美術原始檔在 `art/`（已被 `.gitignore`，可重新處理）；對戰實際用的是 `public/beyblades/*.webp`。
+
+## 詳細文件（docs/）
+
+CLAUDE.md 是速查；深入細節見 docs/（由 init-project-docs 深讀原始碼產生）：
+
+- [docs/README.md](./docs/README.md) — 項目介紹、快速開始、技術棧、文件索引
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — 架構、目錄結構、資料流、API 路由表、WS 協定、DO 狀態機、D1 schema
+- [docs/FEATURES.md](./docs/FEATURES.md) — 功能清單與行為描述（大廳/對戰/名冊/必殺/會心/場地/音效/後台）
+- [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) — 命名規則、確定性鐵則、新增 API/migration/陀螺/場地/音效步驟、環境變數、計畫歸檔流程
+- [docs/TESTING.md](./docs/TESTING.md) — 測試檔案表、平衡工具、確定性/凍結鎖測試、常見陷阱
+- [docs/CHANGELOG.md](./docs/CHANGELOG.md) — 更新日誌（主題式歸納 git 歷史）
+- docs/plans/ — 開發計畫（完成後移 archive/）
+
+`.claude/agents/`：code-reviewer（確定性/DO/慣例審查）、test-runner、security-auditor、git-committer。
