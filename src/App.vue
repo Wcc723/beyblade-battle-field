@@ -52,6 +52,7 @@ const initial = computed(() => {
           <RouterLink to="/test/mobile">測試手機版</RouterLink>
           <RouterLink to="/admin/arena">場地後台</RouterLink>
           <RouterLink to="/admin/beyblade">陀螺後台</RouterLink>
+          <RouterLink to="/admin/special">必殺技後台</RouterLink>
         </template>
       </nav>
       <!-- 等 /api/me 回來再渲染，避免已登入者先閃一下「登入」鈕 -->

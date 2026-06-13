@@ -1,16 +1,15 @@
 <script setup lang="ts">
-// 陀螺庫（/roster）：上半＝我的出賽陣容 3 格（縮圖 + 必殺技），點格子開 BeyPicker 抽屜
-// 選擇/替換；下半＝全名冊卡片牆（瀏覽用），點卡片也開 BeyPicker 預選該顆。
+// 陀螺庫（/roster）：我的出賽陣容 3 格（縮圖 + 必殺技），點格子開 BeyPicker 抽屜
+// 選擇/替換（全名冊瀏覽在抽屜內，不另設卡片牆）。
 // lineup 持久化在 user_settings（PUT 全量 settings——先 GET 留存其他欄位再合併送出，
 // 否則 worker 端 sanitize 會把缺欄重設、洗掉其他設定）。
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { BEYBLADES, getBey, beyFullName } from "../game/beyblades";
+import { getBey } from "../game/beyblades";
 import { PRESET_LABELS } from "../physics/presets";
 import { SPECIAL_DESCS, SPECIAL_ORDER, getSpecialDesc } from "../game/specialDesc";
 import BbIcon from "../components/ui/BbIcon.vue";
-import RadarHex from "../components/ui/RadarHex.vue";
-// 色票/雷達正規化共用 BeyPicker 的 named exports（抽屜內外同一份，數值不飄移）
-import BeyPicker, { TYPE_BADGE, TYPE_COLOR, DIM_LABELS, radarValues } from "../components/BeyPicker.vue";
+// 類型徽章樣式共用 BeyPicker 的 named export
+import BeyPicker, { TYPE_BADGE } from "../components/BeyPicker.vue";
 
 interface LineupEntry {
   beyId: string;
@@ -61,9 +60,6 @@ onMounted(async () => {
 });
 
 /* ---- 陣容編輯：一律經 BeyPicker 抽屜選擇/替換；slot-x 直接移除 ---- */
-function inLineup(beyId: string): boolean {
-  return lineup.some((e) => e.beyId === beyId);
-}
 function removeAt(i: number) {
   lineup.splice(i, 1);
   notice.value = "";
@@ -81,13 +77,6 @@ function openSlotPicker(i: number) {
   const idx = Math.min(i, lineup.length);
   pickerSlot.value = idx;
   pickerInitial.value = lineup[idx]?.beyId;
-  pickerOpen.value = true;
-}
-/** 點名冊卡片：已出賽 → 開該格；未出賽 → 第一個空格（已滿則 null＝只能瀏覽） */
-function openCardPicker(beyId: string) {
-  const idx = lineup.findIndex((e) => e.beyId === beyId);
-  pickerSlot.value = idx >= 0 ? idx : lineup.length < 3 ? lineup.length : null;
-  pickerInitial.value = beyId;
   pickerOpen.value = true;
 }
 /** 抽屜確認：替換既有格（保留該格已選必殺技）或新增到尾端 */
@@ -189,30 +178,6 @@ async function save() {
           <span v-if="savedAt && !error" class="saved"><BbIcon name="check" :size="14" />已儲存</span>
         </div>
       </template>
-    </section>
-
-    <!-- 下半：陀螺庫全名冊 -->
-    <section class="plate card lib">
-      <h2 class="page-title"><BbIcon name="gear" :size="18" />陀螺庫</h2>
-      <div class="bey-grid">
-        <button
-          v-for="bey in BEYBLADES"
-          :key="bey.id"
-          class="bey-card"
-          :class="{ picked: inLineup(bey.id) }"
-          @click="openCardPicker(bey.id)"
-        >
-          <RadarHex :values="radarValues(bey)" :labels="DIM_LABELS" :color="TYPE_COLOR[bey.type]" />
-          <div class="bey-name">{{ beyFullName(bey) }}</div>
-          <div class="bey-tags">
-            <span class="f-badge" :class="TYPE_BADGE[bey.type]">{{ PRESET_LABELS[bey.type] }}</span>
-            <span v-if="inLineup(bey.id)" class="f-badge f-badge--amber">
-              <BbIcon name="check" :size="10" />出賽中
-            </span>
-          </div>
-        </button>
-      </div>
-      <p class="hint">點卡片開啟選擇器加入或替換陣容。六維為全名冊相對值（會心＝爆擊機率、必殺＝必殺技強度）。</p>
     </section>
 
     <!-- 陀螺選擇器（off-canvas 底部抽屜） -->

@@ -38,16 +38,40 @@ export default {
       return Response.json({ ok: true, service: "beyblade-battle-field" });
     }
 
-    // --- 打擊音效取樣（R2，公開資產不需登入）---
-    // 檔名白名單格式（hit-l-0.wav 之類）防奇形怪狀 key；R2 缺檔回 404，前端會自動回退合成音效。
+    // --- 音效取樣與 BGM（R2，公開資產不需登入）---
+    // 檔名白名單（hit-l-0.wav / bgm-0.mp3 之類）防奇形怪狀 key；R2 缺檔回 404，前端自動回退。
+    // BGM mp3 較大 → 支援 Range 請求（<audio> 串流/拖曳進度需要）。
     if (path.startsWith("/api/sfx/") && request.method === "GET") {
       const key = path.slice("/api/sfx/".length);
-      if (!/^[a-z0-9-]+\.wav$/.test(key)) return new Response("bad key", { status: 400 });
+      const m = /^[a-z0-9-]+\.(wav|mp3)$/.exec(key);
+      if (!m) return new Response("bad key", { status: 400 });
+      const type = m[1] === "mp3" ? "audio/mpeg" : "audio/wav";
+      const range = request.headers.get("Range");
+      const rangeMatch = range && /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (rangeMatch) {
+        const obj = await env.SFX.get(key);
+        if (!obj) return new Response("not found", { status: 404 });
+        const total = obj.size;
+        const start = rangeMatch[1] ? parseInt(rangeMatch[1], 10) : 0;
+        const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : total - 1;
+        if (start >= total || start > end) return new Response("range not satisfiable", { status: 416 });
+        const ranged = await env.SFX.get(key, { range: { offset: start, length: end - start + 1 } });
+        return new Response(ranged?.body ?? null, {
+          status: 206,
+          headers: {
+            "Content-Type": type,
+            "Content-Range": `bytes ${start}-${end}/${total}`,
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=31536000, immutable",
+          },
+        });
+      }
       const obj = await env.SFX.get(key);
       if (!obj) return new Response("not found", { status: 404 });
       return new Response(obj.body, {
         headers: {
-          "Content-Type": "audio/wav",
+          "Content-Type": type,
+          "Accept-Ranges": "bytes",
           // 內容不可變（改音效會換檔名）→ 瀏覽器與 CDN 都可長快取
           "Cache-Control": "public, max-age=31536000, immutable",
           ...(obj.httpEtag ? { ETag: obj.httpEtag } : {}),

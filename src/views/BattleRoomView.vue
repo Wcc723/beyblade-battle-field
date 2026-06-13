@@ -6,6 +6,7 @@ import BbIcon from "../components/ui/BbIcon.vue";
 import { useBattle } from "../composables/useBattle";
 import { useOnlineBattle } from "../composables/useOnlineBattle";
 import { beyFullName, DEFAULT_LINEUP, getBey } from "../game/beyblades";
+import { startBgm, stopBgm, tryResumeBgm, toggleBgm, bgmEnabled } from "../audio/bgm";
 import type { ArenaConfig, BeybladeStats, SpecialConfig } from "../physics/types";
 
 const route = useRoute();
@@ -87,6 +88,8 @@ onMounted(() => {
   void loadServerConfig();
   void loadMyLineup();
   window.addEventListener("beforeunload", onBeforeUnload);
+  startBgm(); // 進對戰隨機播 BGM（autoplay 被擋時等首次手勢補播）
+  window.addEventListener("pointerdown", tryResumeBgm); // 首次手勢補播被擋的 BGM
 });
 onBeforeUnmount(() => {
   clearTimeout(configRetry);
@@ -94,6 +97,8 @@ onBeforeUnmount(() => {
   clearTimeout(spBannerTimer);
   clearTimeout(tapArmTimer);
   window.removeEventListener("beforeunload", onBeforeUnload);
+  window.removeEventListener("pointerdown", tryResumeBgm);
+  stopBgm();
   online.dispose();
 });
 
@@ -524,6 +529,9 @@ function onSpecialChange() {
       <span class="foot-arena">場地：{{ online.matchArena.value?.name ?? bt.arenaName.value }}</span>
       <button class="cornerbtn" :aria-label="sfxEnabled ? '關閉音效' : '開啟音效'" @click="sfxEnabled = !sfxEnabled">
         <BbIcon :name="sfxEnabled ? 'volume-up' : 'volume-mute'" :size="14" />
+      </button>
+      <button class="cornerbtn" :aria-label="bgmEnabled ? '關閉背景音樂' : '開啟背景音樂'" @click="toggleBgm">
+        <BbIcon :name="bgmEnabled ? 'music' : 'music-mute'" :size="14" />
       </button>
       <RouterLink class="cornerbtn" to="/" aria-label="離開房間"><BbIcon name="door-open" :size="14" /></RouterLink>
     </div>
