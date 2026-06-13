@@ -10,7 +10,7 @@
 import { ref } from "vue";
 
 const TRACKS = ["bgm-0", "bgm-1"];
-const VOLUME = 0.3; // 背景音樂壓低，不蓋過打擊音效
+const VOLUME = 0.16; // 背景音樂壓低，不蓋過打擊音效
 const STORAGE_KEY = "bb-bgm-on";
 
 function loadEnabled(): boolean {
