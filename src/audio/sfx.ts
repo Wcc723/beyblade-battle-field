@@ -127,6 +127,12 @@ function ensure(): AudioContext | null {
     busS.gain.value = 0.9;
     busS.connect(masterInput);
 
+    /* 取樣匯流排：成品音效不過量化/壓縮，直入 master（仍吃 master limiter 防爆） */
+    sampleBus = ctx.createGain();
+    sampleBus.gain.value = 1.0;
+    sampleBus.connect(masterInput);
+    preloadSamples();
+
     /* C 引擎：crusher → pump comp → makeup → master；sub 直入 comp（吃 pump、不被量化） */
     cComp = ctx.createDynamicsCompressor();
     cComp.threshold.value = C_PARAMS.comp.threshold;
@@ -146,11 +152,95 @@ function ensure(): AudioContext | null {
   return ctx;
 }
 
-/** 使用者手勢後呼叫 → 解除瀏覽器 autoplay 限制 + 同步音量。 */
+/* ============================================================
+   取樣引擎（使用者於 sfx-pick 選定，2026-06，CC 素材轉 wav → R2）
+   音檔不進 repo：/api/sfx/<key>.wav（worker → bucket beyblade-sfx，immutable 快取）；
+   原始 opus 在 public/sfx-test/（gitignored），上傳見 scripts/upload-sfx.sh。
+   多檔槽位 round-robin 輪播；任何取樣未載入 → 自動回退下方合成版（離線/本地沒檔也有聲）。
+   ============================================================ */
+// 槽位 → R2 key 清單（與上傳命名一致；撞擊三檔按力道選組）
+const SAMPLE_MAP: Record<string, string[]> = {
+  "hit-light": ["hit-light-0"],
+  "hit-medium": ["hit-medium-0"],
+  "hit-heavy": ["hit-heavy-0"],
+  ko: ["ko-0"],
+  "ring-out": ["ring-out-0"],
+  "spin-out": ["spin-out-0"],
+  launch: ["launch-0"],
+  "special-rush": ["special-rush-0", "special-rush-1"],
+  "special-blast": ["special-blast-0", "special-blast-1"],
+  "special-dash": ["special-dash-0", "special-dash-1", "special-dash-2"],
+  "special-vortex": ["special-vortex-0", "special-vortex-1"],
+  "special-clone": ["special-clone-0", "special-clone-1", "special-clone-2", "special-clone-3"],
+  win: ["win-0", "win-1"],
+  lose: ["lose-0"],
+};
+// 逐槽音量微調（取樣已 peak normalize 到 -1dB，這裡平衡「響度」：歡呼當背景壓低、撞擊保衝擊）
+const SAMPLE_GAIN: Record<string, number> = {
+  "hit-light": 0.85,
+  "hit-medium": 0.95,
+  "hit-heavy": 1.0,
+  ko: 1.0,
+  "ring-out": 0.7,
+  "spin-out": 0.6,
+  launch: 0.6,
+  "special-rush": 0.8,
+  "special-blast": 0.8,
+  "special-dash": 0.7,
+  "special-vortex": 0.75,
+  "special-clone": 0.7,
+  win: 0.6,
+  lose: 0.6,
+};
+let sampleBus: GainNode | null = null;
+const sampleBufs = new Map<string, AudioBuffer>(); // key → decoded buffer
+let samplesRequested = false;
+const lastPlayedIdx: Record<string, number> = {}; // 槽位 → 上次播的 index（round-robin 不連發）
+
+/** 懶載入全部取樣（首次 ensure/resume 後背景跑、不阻塞）；單檔失敗就缺那檔、播放時回退合成。 */
+function preloadSamples(): void {
+  if (samplesRequested || !ctx) return;
+  samplesRequested = true;
+  const c = ctx;
+  for (const keys of Object.values(SAMPLE_MAP)) {
+    for (const k of keys) {
+      fetch(`/api/sfx/${k}.wav`)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((ab) => c.decodeAudioData(ab))
+        .then((buf) => sampleBufs.set(k, buf))
+        .catch(() => {
+          /* 缺檔 → 該槽回退合成 */
+        });
+    }
+  }
+}
+
+/** 播一發取樣（round-robin 不連發同變體、±6% 變速防重複感）。回傳 false＝該槽無可用 buffer（呼叫端走合成）。 */
+function playSample(slot: string, extraGain = 1): boolean {
+  const c = ctx;
+  if (!c || !sampleBus || !sfxEnabled.value) return false;
+  const keys = (SAMPLE_MAP[slot] ?? []).filter((k) => sampleBufs.has(k));
+  if (!keys.length) return false;
+  let pick = Math.floor(Math.random() * keys.length);
+  if (keys.length > 1 && pick === lastPlayedIdx[slot]) pick = (pick + 1) % keys.length;
+  lastPlayedIdx[slot] = pick;
+  const src = c.createBufferSource();
+  src.buffer = sampleBufs.get(keys[pick])!;
+  src.playbackRate.value = 1 + (Math.random() * 2 - 1) * 0.06;
+  const g = c.createGain();
+  g.gain.value = (SAMPLE_GAIN[slot] ?? 0.8) * extraGain;
+  src.connect(g);
+  g.connect(sampleBus);
+  src.start();
+  return true;
+}
+
+/** 使用者手勢後呼叫 → 解除瀏覽器 autoplay 限制 + 同步音量 + 觸發取樣懶載入。 */
 export function resumeAudio(): void {
   const c = ensure();
   if (c && c.state === "suspended") void c.resume();
   if (masterInput) masterInput.gain.value = sfxVolume.value;
+  preloadSamples();
 }
 
 export function setSfxVolume(v: number): void {
@@ -228,6 +318,10 @@ export function playCollision(impact: number): void {
   if (!c || !cCrush || !cComp || !sfxEnabled.value) return;
   const s = Math.min(1, impact / 260);
   if (s < 0.05) return;
+  // 取樣優先：力道分輕/中/重三組，越重音量略升
+  const slot = impact < 70 ? "hit-light" : impact < 140 ? "hit-medium" : "hit-heavy";
+  if (playSample(slot, 0.85 + 0.3 * s)) return;
+  // —— 合成兜底 ——
   const P = C_PARAMS;
   const t = c.currentTime + 0.001 + Math.random() * 0.004;
   const fStart = (P.dropF0 + P.dropSpan * s) * jit(0.07);
@@ -268,6 +362,7 @@ export function playCollision(impact: number): void {
 export function playKO(): void {
   const c = ensure();
   if (!c || !cCrush || !cComp || !sfxEnabled.value) return;
+  if (playSample("ko")) return; // 取樣優先
   const t = c.currentTime + 0.002;
   const stack: [OscillatorType, number][] = [
     ["sawtooth", 0],
@@ -313,6 +408,7 @@ export function playKO(): void {
 export function playLaunch(): void {
   const c = ensure();
   if (!c || !busS || !sfxEnabled.value) return;
+  if (playSample("launch")) return; // 取樣優先
   const t = c.currentTime + 0.002;
   // 1) 放手瞬間：悶 click + 柔 thump（觸感回饋，不刺耳）
   burstNoise(busS, t, 0.025, 0.14, "bandpass", 1600);
@@ -354,6 +450,7 @@ export function playLaunch(): void {
 export function playRingOut(): void {
   const c = ensure();
   if (!c || !busS || !sfxEnabled.value) return;
+  if (playSample("ring-out")) return; // 取樣優先
   const P = SHARED_PARAMS.ringOut;
   const t = c.currentTime + 0.002;
   burstNoise(busS, t, P.whoosh.dur, P.whoosh.gain, "bandpass", P.whoosh.f0, P.whoosh.f1);
@@ -366,6 +463,7 @@ export function playRingOut(): void {
 export function playSpecial(kind: string): void {
   const c = ensure();
   if (!c || !busS || !sfxEnabled.value) return;
+  if (playSample(`special-${kind}`)) return; // 取樣優先（每招獨立槽位）
   const t = c.currentTime + 0.002;
   const base = ({ rush: 320, blast: 200, dash: 540, vortex: 230, clone: 400 } as Record<string, number>)[kind] ?? 300;
   toneAt(busS, t, 0.26, 0.16, "sawtooth", base, base * 2.4);
@@ -376,13 +474,24 @@ export function playSpecial(kind: string): void {
 export function playSpinOut(): void {
   const c = ensure();
   if (!c || !busS || !sfxEnabled.value) return;
+  if (playSample("spin-out")) return; // 取樣優先
   toneAt(busS, c.currentTime + 0.002, 0.7, 0.18, "triangle", 440, 70);
 }
 
-/** 勝利：三音小喇叭。 */
+/** 勝利（match 結束、我方獲勝）：取樣＝觀眾歡呼；回退三音小喇叭。 */
 export function playWin(): void {
   const c = ensure();
   if (!c || !busS || !sfxEnabled.value) return;
+  if (playSample("win")) return; // 取樣優先
   const t = c.currentTime + 0.002;
   [523, 659, 784].forEach((f, i) => toneAt(busS!, t + i * 0.11, 0.26, 0.2, "triangle", f));
+}
+
+/** 落敗（match 結束、我方落敗）：取樣＝觀眾噓聲；回退下行三音。 */
+export function playLose(): void {
+  const c = ensure();
+  if (!c || !busS || !sfxEnabled.value) return;
+  if (playSample("lose")) return; // 取樣優先
+  const t = c.currentTime + 0.002;
+  [392, 311, 233].forEach((f, i) => toneAt(busS!, t + i * 0.13, 0.3, 0.16, "triangle", f));
 }

@@ -131,6 +131,7 @@ export function useOnlineBattle(code: string, options: UseOnlineBattleOptions = 
       case "room": {
         const prev = snapshot.value?.phase;
         you.value = msg.you;
+        if (bt) bt.mySide.value = msg.you; // 勝負音視角：我方 side（win/lose 依此選）
         snapshot.value = msg.snapshot;
         applySnapshot(prev);
         return;

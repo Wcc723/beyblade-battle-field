@@ -34,6 +34,7 @@ public/sfx-test/
 | `special-vortex` | 必殺-vortex（旋渦） |
 | `special-clone` | 必殺-clone（分身） |
 | `win` | 勝利 |
+| `lose` | 落敗（無合成版，僅資料夾音檔） |
 
 ## 支援格式
 

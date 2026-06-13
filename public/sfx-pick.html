@@ -164,6 +164,7 @@ var SLOTS = [
   { id: 'special-vortex',name: '必殺-vortex',    special: 'vortex' },
   { id: 'special-clone', name: '必殺-clone',     special: 'clone' },
   { id: 'win',           name: '勝利' },
+  { id: 'lose',          name: '落敗',          noCurrent: true },
 ];
 var KIND_LABELS = {
   current: ['現役', 'sfx.ts 目前版本'],
@@ -780,7 +781,7 @@ function buildSlots() {
     head.appendChild(h2); head.appendChild(code); head.appendChild(picked);
     card.appendChild(head);
 
-    var kinds = def.lab ? ['current', 'lab-a', 'lab-b', 'lab-d'] : ['current'];
+    var kinds = def.lab ? ['current', 'lab-a', 'lab-b', 'lab-d'] : def.noCurrent ? [] : ['current'];
     kinds.forEach(function (k) {
       card.appendChild(makeOptionRow(def.id, k, null, KIND_LABELS[k][0], KIND_LABELS[k][1]));
     });

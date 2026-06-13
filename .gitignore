@@ -14,3 +14,8 @@ art/
 # 系統 / 雜項
 .DS_Store
 *.log
+
+# 音效源素材（已轉 wav 上 R2，不進 repo；保留 manifest/README/.gitkeep）
+public/sfx-test/**/*.opus
+public/sfx-test/**/*.wav
+public/sfx-test/**/*.mp3

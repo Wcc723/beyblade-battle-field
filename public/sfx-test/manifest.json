@@ -1,16 +1,38 @@
 {
   "_說明": "把音檔丟進 public/sfx-test/<槽位>/ 並在此登記。例如 \"hit-light\": [\"clang-1.wav\", \"clang-2.mp3\"] 會對應 public/sfx-test/hit-light/clang-1.wav 等。詳見同目錄 README.md。",
-  "hit-light": [],
-  "hit-medium": [],
-  "hit-heavy": [],
-  "ko": [],
-  "ring-out": [],
-  "spin-out": [],
-  "launch": [],
-  "special-rush": [],
-  "special-blast": [],
-  "special-dash": [],
-  "special-vortex": [],
-  "special-clone": [],
-  "win": []
+  "hit-light": ["Fist blow, short, single.opus"],
+  "hit-medium": ["A heavy, short, single punch..opus"],
+  "hit-heavy": ["A heavy, short, single punch. (1).opus"],
+  "ko": ["Street Fighter - Slam, Short, Single Attack.opus"],
+  "ring-out": ["Out of bounds warning beep.opus"],
+  "spin-out": ["whooshing sound.opus"],
+  "launch": ["whooshing sound.opus"],
+  "special-rush": [
+    "A massive cartoon-style explosion sound effect, sh.opus",
+    "Modern and detailed game sound effects, depicting.opus"
+  ],
+  "special-blast": [
+    "3A game sound effects, the sound of powerful wind.opus",
+    "whooshing sound.opus"
+  ],
+  "special-dash": [
+    "In AAA games, there's a sound like nitrous oxide b.opus",
+    "The engine started nitrous oxide injection, and th.opus",
+    "The sound of a high-horsepower racing car engine a.opus"
+  ],
+  "special-vortex": [
+    "A vortex, the sound of pulling many things in. (1).opus",
+    "A vortex, the sound of pulling many things in..opus"
+  ],
+  "special-clone": [
+    "In AAA games, there's a sound like a ninja moving (1).opus",
+    "In AAA games, there's a sound like a ninja moving (2).opus",
+    "In AAA games, there's a sound like a ninja moving.opus",
+    "Whooshing sound of high-speed movement..opus"
+  ],
+  "win": [
+    "Crowd cheering and a distant bass thumping in a la.opus",
+    "The cheers of the crowd below the stage at their c.opus"
+  ],
+  "lose": ["The boos from the crowd below the stage in respons.opus"]
 }

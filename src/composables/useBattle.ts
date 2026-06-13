@@ -27,6 +27,7 @@ import {
   playSpinOut,
   playLaunch,
   playWin,
+  playLose,
 } from "../audio/sfx";
 
 /**
@@ -96,6 +97,12 @@ export function useBattle(opts: UseBattleOptions = {}) {
   const roundScored = ref(false);
   const lastRoundPoints = ref(0);
   const matchOver = computed(() => scoreA.value >= WIN_SCORE || scoreB.value >= WIN_SCORE);
+
+  // 勝負音視角：線上由 useOnlineBattle 設 mySide（"A"/"B"），並在 playRemoteRound 帶入伺服器
+  // outcome（remoteMatchOver/remoteWinnerSide）；測試頁 mySide 維持 null＝用本機分數判定。
+  const mySide = ref<"A" | "B" | null>(null);
+  const remoteMatchOver = ref(false);
+  const remoteWinnerSide = ref<"A" | "B" | "" | null>(null); // ""＝平手（falsy → 不播勝負音）
 
   // 出界計分依場地「邊緣分區」資料：邏輯抽到 src/game/scoring.ts（與 Battle Room DO 共用）
   function roundPoints(r: SimResult): number {
@@ -368,7 +375,11 @@ export function useBattle(opts: UseBattleOptions = {}) {
     special: SpecialConfig;
     maxTime?: number;
     followThroughTime?: number;
+    outcome?: { matchOver?: boolean; winnerSide?: "A" | "B" | "" | null };
   }) {
+    // 伺服器 outcome：勝負音用它判定（線上本機分數不權威，回放結束時播 win/lose 靠這個）
+    remoteMatchOver.value = !!p.outcome?.matchOver;
+    remoteWinnerSide.value = p.outcome?.winnerSide ?? null;
     arena.value = { ...p.arena };
     result.value = simulate(p.inits, {
       dt: 1 / 60,
@@ -487,7 +498,18 @@ export function useBattle(opts: UseBattleOptions = {}) {
         playing.value = false;
         slowmo.value = false;
         awardRound(); // 回放結束才結算分數
-        if (sfxEnabled.value && result.value?.winnerId) playWin();
+        // 勝負音只在「整場 match 結束」播（每回合都歡呼太吵）：
+        // 測試頁（mySide null）用本機分數 + 回合勝者；線上用伺服器 outcome（remoteMatch*）。
+        if (sfxEnabled.value) {
+          const online = mySide.value !== null;
+          const ended = online ? remoteMatchOver.value : matchOver.value;
+          const winner = online ? remoteWinnerSide.value : result.value?.winnerId;
+          if (ended && winner) {
+            const iWon = !online || mySide.value === winner;
+            if (iWon) playWin();
+            else playLose();
+          }
+        }
         draw();
         return;
       }
@@ -1670,6 +1692,7 @@ export function useBattle(opts: UseBattleOptions = {}) {
     statsOverride,
     specialCfg,
     playRemoteRound,
+    mySide,
     // 畫布 / 拖曳
     canvas,
     shakeEl, // 場地震動容器（包 ArenaSvg + canvas 的 div；模板 ref="shakeEl" 綁定）
