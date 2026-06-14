@@ -104,7 +104,8 @@ onBeforeUnmount(() => {
 
 /* ---------- 對戰中離開警告 ----------
    進行中（連線正常 + 比賽未結束 + aiming/review）才攔；waiting / finished /
-   滿房 / 被取代 / 斷線都放行。「離開房間」角落鍵是 RouterLink → 同樣走 route 守衛。 */
+   滿房 / 被取代 / 斷線 / 對手已離線 都放行（對手離線時房間形同空轉，不該再攔人）。
+   「離開房間」角落鍵是 RouterLink → 同樣走 route 守衛。 */
 const battleActive = computed(
   () =>
     online.connected.value &&
@@ -112,6 +113,7 @@ const battleActive = computed(
     !online.superseded.value &&
     !online.roomClosed.value &&
     !online.lastOutcome.value?.matchOver &&
+    !oppOffline.value &&
     (snap.value?.phase === "aiming" || snap.value?.phase === "review"),
 );
 function onBeforeUnload(e: BeforeUnloadEvent): void {
@@ -140,6 +142,15 @@ const mySide = computed(() => online.you.value);
 const mySetup = computed(() => (mySide.value === "B" ? setupB : setupA));
 const isAiming = computed(() => snap.value?.phase === "aiming");
 const waitingOpponent = computed(() => !snap.value || snap.value.phase === "waiting");
+// 對手離線（從我方視角：未連線的那一側即對手；BOT 恆在線、不算離線）
+const oppSide = computed<"A" | "B" | null>(() => (mySide.value === "A" ? "B" : mySide.value === "B" ? "A" : null));
+const oppOffline = computed(() => {
+  const p = oppSide.value ? snap.value?.players[oppSide.value] : undefined;
+  return !!p && !p.connected;
+});
+// 灰階化用：哪一側未連線（畫面上把該側名牌/陀螺/儀表轉灰）
+const aOffline = computed(() => !!snap.value?.players.A && !snap.value.players.A.connected);
+const bOffline = computed(() => !!snap.value?.players.B && !snap.value.players.B.connected);
 // phase !== 'playing'：對手提早按下一回合時（snapshot 已 aiming、本地回放未完）不能讓瞄準面板蓋掉回放控制
 const showAimPanel = computed(() => isAiming.value && !online.myLaunched.value && phase.value !== "playing");
 const replayDone = computed(() => bt.isFinished());
@@ -303,7 +314,7 @@ function onSpecialChange() {
       <div class="hazard hazard--thin"></div>
       <div class="hud-top">
         <!-- 紅方 A（先手・右旋） -->
-        <div class="fighter fa">
+        <div class="fighter fa" :class="{ offline: aOffline }">
           <div class="nameplate">
             <div class="np-row">
               <img v-if="snap?.players.A?.picture" :src="snap.players.A.picture" class="np-ava" alt="" referrerpolicy="no-referrer" />
@@ -351,7 +362,7 @@ function onSpecialChange() {
           </div>
         </div>
         <!-- 藍方 B（後手・左旋；鏡像） -->
-        <div class="fighter fb">
+        <div class="fighter fb" :class="{ offline: bOffline }">
           <div class="nameplate">
             <div class="np-row">
               <img v-if="snap?.players.B?.picture" :src="snap.players.B.picture" class="np-ava" alt="" referrerpolicy="no-referrer" />
@@ -381,6 +392,13 @@ function onSpecialChange() {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- 對手離線提示：房間形同空轉，引導隨時離開（離開已不再跳「對戰進行中」確認） -->
+    <div v-if="oppOffline" class="opp-left">
+      <BbIcon name="wifi" :size="16" class="opp-left-ic" />
+      <span class="opp-left-txt">對手已離線，可能不會再回來</span>
+      <RouterLink class="f-btn f-btn--danger opp-left-btn" to="/"><BbIcon name="door-open" :size="14" />離開房間</RouterLink>
     </div>
 
     <!-- 階段狀態帶（回放中整條收掉：REPLAY 併進 HUD 中央銘牌、訊息改掛場地下緣） -->
@@ -705,6 +723,63 @@ function onSpecialChange() {
   border: 1px solid rgba(170, 180, 196, 0.3);
   padding: 1px 5px;
   background: rgba(10, 12, 16, 0.55);
+}
+/* ---- 對手離線：該側頭像/名牌/陀螺/儀表轉灰（紅色「離線」徽章維持醒目，不灰化） ---- */
+.fighter.offline .np-ava {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.fighter.offline .nameplate strong {
+  color: var(--muted);
+  background: linear-gradient(180deg, #20242b, #14171d);
+}
+.fighter.offline.fa .nameplate strong {
+  box-shadow: inset 3px 0 0 #5a5f6a;
+}
+.fighter.offline.fb .nameplate strong {
+  box-shadow: inset -3px 0 0 #5a5f6a;
+}
+.fighter.offline .np-blade {
+  color: var(--muted);
+  opacity: 0.75;
+}
+.fighter.offline .chip {
+  opacity: 0.45;
+}
+.fighter.offline .meter-set {
+  filter: grayscale(1);
+  opacity: 0.4;
+}
+/* ---- 對手離線提示橫幅（HUD 與階段帶之間） ---- */
+.opp-left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 8px 0 0;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: rgba(232, 68, 46, 0.1);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  box-shadow: inset 0 0 0 1px rgba(232, 68, 46, 0.4);
+}
+.opp-left-ic {
+  flex: none;
+  color: var(--red);
+}
+.opp-left-txt {
+  flex: 1;
+  min-width: 0;
+}
+.opp-left-btn {
+  flex: none;
+  min-height: 36px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  gap: 5px;
 }
 /* ---- 雙儀表：HP 熔融金屬（即時層 + 白熱 lag 殘影）/ SP 渦輪分段燈 ---- */
 .meter-set {

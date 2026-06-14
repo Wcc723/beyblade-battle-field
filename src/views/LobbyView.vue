@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLobby } from "../composables/useLobby";
 import BbIcon from "../components/ui/BbIcon.vue";
@@ -11,6 +11,15 @@ const roomCode = ref("");
 const codeError = ref("");
 const creating = ref(false);
 const makePublic = ref(true);
+
+// 沒有其他玩家可對戰（只有自己在線、無公開房、未在排隊）→ 凸顯「跟 BOT 對戰」
+const noOpponents = computed(
+  () =>
+    lobby.connected.value &&
+    lobby.online.value <= 1 &&
+    lobby.rooms.value.length === 0 &&
+    !lobby.queued.value,
+);
 
 // 「X 秒前」要會動：rooms 不變時也每 30 秒重算一次
 const now = ref(Date.now());
@@ -138,12 +147,21 @@ function timeAgo(ts: number): string {
         <span class="f-badge f-badge--red">錯誤</span>{{ codeError }}
       </p>
 
+      <!-- 沒有其他玩家時的提示：引導去打 BOT -->
+      <p v-if="noOpponents" class="bot-nudge">
+        <BbIcon name="lightning" :size="13" />目前沒有其他玩家在線 — 先跟 BOT 練一場吧
+      </p>
       <!-- 開房 -->
-      <div class="actions">
+      <div class="actions" :class="{ 'actions--bot-hot': noOpponents }">
         <button class="f-btn f-btn--ghost act-btn" :disabled="creating" @click="createRoom(false)">
           <BbIcon name="plus" :size="16" />{{ creating ? "開房中…" : "建立房間" }}
         </button>
-        <button class="f-btn f-btn--ghost act-btn bot-btn" :disabled="creating" @click="createRoom(true)">
+        <button
+          class="f-btn act-btn bot-btn"
+          :class="noOpponents ? 'bot-btn--hot' : 'f-btn--ghost'"
+          :disabled="creating"
+          @click="createRoom(true)"
+        >
           <BbIcon name="controller" :size="16" />跟 BOT 對戰
         </button>
       </div>
@@ -350,6 +368,39 @@ function timeAgo(ts: number): string {
 .bot-btn,
 .bot-btn:hover {
   color: var(--blue);
+}
+/* 沒玩家時凸顯：藍鍵面填滿 + 發光脈動 + 佔更大寬度 */
+.actions--bot-hot .bot-btn {
+  flex: 1.7 1 auto;
+}
+.bot-btn--hot,
+.bot-btn--hot:hover {
+  color: var(--white-hot);
+  background: linear-gradient(180deg, #2e9fe8, #14629c);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  animation: botPulse 1.5s ease-in-out infinite;
+}
+@keyframes botPulse {
+  0%,
+  100% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 0 0 1px rgba(120, 200, 255, 0.5);
+  }
+  50% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 0 0 2px rgba(160, 220, 255, 0.95);
+  }
+}
+/* 沒玩家提示小字 */
+.bot-nudge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--blue);
+}
+.bot-nudge .bb-icon {
+  color: var(--accent);
 }
 
 /* ---- 公開房間勾選：金屬方形勾選鍵 ---- */
