@@ -243,6 +243,14 @@ export function resumeAudio(): void {
   preloadSamples();
 }
 
+/**
+ * 共用 AudioContext：BGM 併入同一個 → 不另開 HTMLAudioElement 媒體播放
+ * （手機鎖屏/控制中心不冒音樂控制列）、也不與音效搶音訊通道。
+ */
+export function getSfxContext(): AudioContext | null {
+  return ensure();
+}
+
 export function setSfxVolume(v: number): void {
   sfxVolume.value = Math.max(0, Math.min(1, v));
   if (masterInput) masterInput.gain.value = sfxVolume.value;

@@ -14,6 +14,7 @@ import { handleLogin, handleCallback, handleLogout, isAdminEmail } from "./auth"
 import { getSession, type SessionData } from "./session";
 import { handleGetConfig, handlePutAdminConfig, handleGetSettings, handlePutSettings, handleGetMatches } from "./api";
 import { genRoomCode } from "../src/game/room";
+import { autoNickname } from "../src/game/names";
 import type { JoinUser } from "./battleRoomDO";
 
 export { BattleRoomDO } from "./battleRoomDO";
@@ -21,12 +22,12 @@ export { LobbyDO } from "./lobbyDO";
 
 const ROOM_CODE_RE = /^\/api\/room\/([A-Z0-9]{6})\/ws$/;
 
-/** 對戰顯示用暱稱：user_settings 優先，fallback Google 名/email */
+/** 對戰顯示用暱稱：user_settings 優先，fallback 隨機中二代號（不洩漏 Google 本名/email） */
 async function nicknameOf(env: Env, session: SessionData): Promise<string> {
   const row = await env.DB.prepare("SELECT nickname FROM user_settings WHERE user_id = ?1")
     .bind(session.uid)
     .first<{ nickname: string }>();
-  return (row?.nickname || session.name || session.email.split("@")[0]).slice(0, 20);
+  return (row?.nickname || autoNickname(session.uid)).slice(0, 20);
 }
 
 export default {
@@ -170,7 +171,7 @@ export default {
         .first<{ nickname: string; default_type: string; default_spin: string; default_special: string }>();
       const user: JoinUser = {
         uid: session.uid,
-        nickname: (row?.nickname || session.name || session.email.split("@")[0]).slice(0, 20),
+        nickname: (row?.nickname || autoNickname(session.uid)).slice(0, 20),
         picture: session.picture,
         loadout: {
           type: row?.default_type ?? "balance",

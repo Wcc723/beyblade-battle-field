@@ -3,7 +3,7 @@
 // 選擇/替換（全名冊瀏覽在抽屜內，不另設卡片牆）。
 // lineup 持久化在 user_settings（PUT 全量 settings——先 GET 留存其他欄位再合併送出，
 // 否則 worker 端 sanitize 會把缺欄重設、洗掉其他設定）。
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { getBey } from "../game/beyblades";
 import { PRESET_LABELS } from "../physics/presets";
 import { SPECIAL_DESCS, SPECIAL_ORDER, getSpecialDesc } from "../game/specialDesc";
@@ -40,12 +40,30 @@ const savedAt = ref(0);
 const error = ref("");
 const notice = ref(""); // 陣容已滿等暫時提示
 
-// 再動陣容就收掉「已儲存」，避免看起來像新改動也存了
+/* ---- 即時儲存：動陣容即 debounce 寫回（無手動「儲存」鍵） ---- */
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let dirty = false;
+let ready = false; // 初次載入完成才開放自動儲存（避免載入的 splice 觸發一次原封回送）
+
+// reactive 物件預設深層監看 → 換陀螺 / 改必殺技 / 移出都觸發
 watch(lineup, () => {
-  savedAt.value = 0;
+  savedAt.value = 0; // 收掉「已儲存」字樣，避免看起來像新改動也存了
+  scheduleSave();
 });
 
+function scheduleSave() {
+  if (!ready) return; // 初次載入造成的 watcher flush 不算使用者編輯
+  if (lineup.length === 0) return; // 空陣容不存（worker 會回退預設＝形同清掉使用者選擇）
+  dirty = true;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    void flushSave();
+  }, 600);
+}
+
 onMounted(async () => {
+  window.addEventListener("pagehide", flushNow); // debounce 未到點就切背景/離開：補送
   try {
     const res = await fetch("/api/settings");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -57,6 +75,13 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+  await nextTick(); // 等首次載入造成的 watcher flush 過去，再開放自動儲存
+  ready = true;
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pagehide", flushNow);
+  flushNow();
 });
 
 /* ---- 陣容編輯：一律經 BeyPicker 抽屜選擇/替換；slot-x 直接移除 ---- */
@@ -100,8 +125,10 @@ const slotRows = computed(() =>
   }),
 );
 
-async function save() {
-  if (!base.value) return;
+/** 送出目前陣容（debounce 到點 / 卸載 flush 呼叫）；keepalive 撐過整頁卸載 */
+async function flushSave(keepalive = false) {
+  if (!dirty || !base.value || lineup.length === 0) return;
+  dirty = false;
   saving.value = true;
   error.value = "";
   try {
@@ -109,6 +136,7 @@ async function save() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...base.value, lineup: lineup.map((e) => ({ ...e })) }),
+      keepalive,
     });
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -116,10 +144,20 @@ async function save() {
     }
     savedAt.value = Date.now();
   } catch (e) {
+    dirty = true; // 失敗保留 dirty：下次變更或卸載再補送
     error.value = `儲存失敗：${e instanceof Error ? e.message : String(e)}`;
   } finally {
     saving.value = false;
   }
+}
+
+/** debounce 未到點就卸載/切背景：立刻補送（keepalive 撐過卸載） */
+function flushNow() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  void flushSave(true);
 }
 </script>
 
@@ -172,10 +210,10 @@ async function save() {
         <p v-if="notice" class="notice">{{ notice }}</p>
         <p v-if="error" class="error">{{ error }}</p>
         <div class="actions">
-          <button class="f-btn f-btn--primary" :disabled="saving || lineup.length === 0" @click="save">
-            <BbIcon name="floppy" :size="15" />{{ saving ? "儲存中…" : "儲存陣容" }}
-          </button>
-          <span v-if="savedAt && !error" class="saved"><BbIcon name="check" :size="14" />已儲存</span>
+          <span v-if="lineup.length === 0" class="auto-status warn">至少保留一顆出賽陀螺</span>
+          <span v-else-if="saving" class="auto-status"><BbIcon name="arrow-repeat" :size="14" />儲存中…</span>
+          <span v-else-if="savedAt && !error" class="saved"><BbIcon name="check" :size="14" />已儲存</span>
+          <span v-else class="auto-status"><BbIcon name="floppy" :size="13" />變更會自動儲存</span>
         </div>
       </template>
     </section>
@@ -477,6 +515,18 @@ async function save() {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
+}
+/* 自動儲存狀態（無手動鍵）：預設灰提示、警示用琥珀 */
+.auto-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+}
+.auto-status.warn {
+  color: var(--accent);
 }
 /* 超窄機（<380px）：必殺技列不縮排（爭取描述寬度） */
 @media (max-width: 379.98px) {

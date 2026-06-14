@@ -23,6 +23,7 @@ import {
   type SessionData,
 } from "./session";
 import { decodeJwtPayload } from "./jwt";
+import { autoNickname } from "../src/game/names";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -161,6 +162,19 @@ export async function handleCallback(request: Request, env: Env): Promise<Respon
     return loginErrorRedirect(request, "server_error");
   }
   if (!row) return loginErrorRedirect(request, "server_error");
+
+  // 首次註冊即指派隨機中二暱稱並落地（之後大廳/房間/設定一律看到代號，不洩漏 Google 本名）。
+  // 已有設定列的老用戶 DO NOTHING 保留原暱稱；寫失敗不擋登入（nicknameOf 仍以 autoNickname 兜底）。
+  try {
+    await env.DB.prepare(
+      `INSERT INTO user_settings (user_id, nickname, updated_at) VALUES (?1, ?2, datetime('now'))
+       ON CONFLICT(user_id) DO NOTHING`,
+    )
+      .bind(row.id, autoNickname(row.id))
+      .run();
+  } catch (err) {
+    console.error("auto nickname seed failed", err);
+  }
 
   const session: SessionData = {
     uid: row.id,

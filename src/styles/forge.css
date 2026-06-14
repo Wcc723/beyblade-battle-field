@@ -40,6 +40,9 @@
 }
 html {
   -webkit-text-size-adjust: 100%;
+  /* 手機版固定比例：禁雙擊縮放（iOS 會無視 user-scalable=no，touch-action 才真的擋得住）
+     並移除點擊 300ms 延遲；遊戲拖曳發射用 pointer 事件，manipulation 不影響。 */
+  touch-action: manipulation;
 }
 body {
   margin: 0;

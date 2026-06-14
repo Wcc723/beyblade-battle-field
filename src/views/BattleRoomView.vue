@@ -473,7 +473,9 @@ function onSpecialChange() {
 
         <!-- 場地下緣小字：對手先行提示（取代回放 phase banner）/ 點擊續戰呼吸提示 -->
         <div v-if="phase === 'playing' && snap?.phase === 'aiming'" class="tap-hint">對手已進入下一回合，回放結束後自動繼續</div>
-        <div v-else-if="canTapNext && tapArmed" class="tap-hint breathe">點擊畫面繼續</div>
+        <div v-else-if="canTapNext && tapArmed" class="tap-hint breathe">
+          點擊畫面 · 下一回合<BbIcon name="arrow-right" :size="18" />
+        </div>
       </div>
     </div>
 
@@ -1321,17 +1323,39 @@ function onSpecialChange() {
   clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 100%, 0 100%);
   pointer-events: none;
 }
+/* 點擊續戰：放大成醒目金屬徽章（蓋掉 .tap-hint 的小字基底），琥珀發光 + 脈動 */
 .tap-hint.breathe {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  bottom: 14px;
+  max-width: 96%;
+  overflow: visible;
+  font-family: var(--f-d);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: var(--white-hot);
+  background: linear-gradient(180deg, rgba(255, 122, 24, 0.34), rgba(8, 10, 14, 0.86));
+  padding: 9px 22px;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 179, 31, 0.7);
+  text-shadow: 0 0 12px rgba(255, 179, 31, 0.6);
+  filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.55));
+  animation: tapBreath 1.4s ease-in-out infinite;
+}
+.tap-hint.breathe .bb-icon {
   color: var(--accent);
-  animation: tapBreath 1.6s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(255, 179, 31, 0.6));
 }
 @keyframes tapBreath {
   0%,
   100% {
     opacity: 1;
+    transform: translateX(-50%) scale(1);
   }
   50% {
-    opacity: 0.35;
+    opacity: 0.72;
+    transform: translateX(-50%) scale(1.05);
   }
 }
 
