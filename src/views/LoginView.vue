@@ -31,12 +31,14 @@ const errorMsg = computed(() =>
       <div class="shell-in">
         <!-- 六角徽 + wordmark -->
         <span class="emblem" aria-hidden="true"><BbIcon name="lightning" :size="24" /></span>
-        <h2 class="wordmark">戰鬥陀螺</h2>
+        <h1 class="wordmark">戰鬥陀螺</h1>
         <p class="wordmark-sub">BURST FORGE / ONLINE VS</p>
 
         <div class="split" aria-hidden="true"></div>
 
-        <p class="hint">線上對戰需要 Google 帳號登入（暱稱與頭像預設取自 Google，可在個人設定修改）。</p>
+        <p class="hint">
+          免費的瀏覽器雙人線上對戰需要 Google 帳號登入（暱稱與頭像預設取自 Google，可在個人設定修改）。
+        </p>
 
         <p v-if="errorMsg" class="error">
           <span class="f-badge f-badge--red">登入失敗</span>{{ errorMsg }}

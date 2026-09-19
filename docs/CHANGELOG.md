@@ -14,6 +14,18 @@
 
 ## [未發布 / 待辦]
 
+### 修復（對外正確性）
+
+- **標題改成產品現況**：`index.html` 的 `<title>` 從「戰鬥陀螺 — 物理引擎原型」改為 **「玩戰鬥陀螺線上對戰｜免費瀏覽器雙人遊戲」**——正式站早已是可玩的線上對戰產品，舊標題是過時 metadata。同步新增**逐字相同**的 `og:title` / `twitter:title`（分享卡標題）。刻意**只加這兩個 meta**：本站是 SPA、全站共用一份 `index.html`，補 canonical 會把所有 deep route 錯誤指向 root；description / JSON-LD / sitemap 不在本輪範圍。`html lang="zh-Hant"`、GA、字型皆未動。
+- **登入頁可見定位誠實對齊**：`LoginView.vue` 主 wordmark 由 `h2` 改為語意正確的 `h1`（文字「戰鬥陀螺」與樣式不變——`.wordmark` 已定死字級與邊距）；登入提示改為「免費的瀏覽器雙人線上對戰需要 Google 帳號登入（暱稱與頭像預設取自 Google，可在個人設定修改）。」標題講「免費／瀏覽器／雙人」，頁面就得同時講清楚**本站需要 Google 登入**——可見文案不得暗示免登入。OAuth 行為、錯誤處理與「測試頁不需登入」說明均未動。
+
+### 新增
+
+- **postbuild 標題 gate**：`scripts/seo-audit.mjs`（零依賴純比對 + CLI）掛進 `package.json` 的 `postbuild` → Cloudflare 跑 `npm run build` 時自動執行，任一項不符即 build 失敗（fail-closed，讀不到 `dist` 產物也算不通過）。驗的是：source `index.html` 與 build 產物 `dist/client/index.html` 各有**恰好一個** `<title>` / `og:title` / `twitter:title` 且逐字等於契約、`html lang` 精確為 `zh-Hant`、舊標題零殘留（含 script 字串）；`LoginView.vue` 的 `<template>` 有可見 `h1.wordmark` 與完整登入提示。**只認文字節點**——寫在註解裡、藏在屬性值、或拆成兩個元素都不算過關。
+- **`npm run test:seo`**：`scripts/seo-audit.test.mjs`（`node --test`，27 條測試（含 20 條 mutation tests））——每條契約都配一個壞 fixture（title 重複／缺失／錯字、OG 與 Twitter 錯或缺、lang 錯、舊標題殘留、h1 退回 h2、提示缺「免費／瀏覽器／雙人／需要 Google 帳號登入」各有代表反例），確認 gate 真的擋得下來。`postbuild` 會先跑它再跑 audit。
+
+### 後續方向
+
 從 CLAUDE.md 規格與現況推得的後續方向（尚未開工或進行中）：
 
 - **回放 worker 化 / 觀戰**：目前對戰是「DO 廣播重跑包（inits+seed+config ~2KB）、兩端各自重跑確定性引擎回放」，尚無第三方觀戰與賽後可分享的回放鏈結。確定性架構已具備觀戰所需條件（同一重跑包任意端可重現），待補觀戰連線與旁觀者 UI。
