@@ -3,14 +3,32 @@
   "name": "beyblade-battle-field",
   "main": "./worker/index.ts",
   "compatibility_date": "2026-06-01",
-  // SPA：非資產路徑回 index.html（vue-router history mode）；/api/* 一律先進 Worker
+  // 靜態資產：不存在的路徑回 public/404.html（HTTP 404，不再 soft 404）。
+  // run_worker_first：/api/* 與「頁面」先進 Worker（worker/pages.ts）：
+  //   "/" 依登入分流（未登入＝公開介紹頁 landing.html、已登入＝SPA 大廳）；
+  //   其餘為 vue-router 路由（src/router.ts），回 SPA 殼 index.html 並加 noindex。
+  //   新增前端路由時兩邊都要加（test/pages.test.ts 會交叉比對 router.ts / 本檔 / worker/pages.ts）。
   // directory：dev/build 時 @cloudflare/vite-plugin 會自己管（忽略此值）；
   // 寫上是為了讓「不經 vite 的 wrangler 指令」（如 CI 裡 build 前跑 d1 migrations）也能解析此設定檔
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "not_found_handling": "404-page",
+    "run_worker_first": [
+      "/api/*",
+      "/",
+      "/landing",
+      "/landing/",
+      "/login",
+      "/login/",
+      "/roster",
+      "/roster/",
+      "/settings",
+      "/settings/",
+      "/room/*",
+      "/admin/*",
+      "/test/*"
+    ]
   },
   "observability": {
     "enabled": true

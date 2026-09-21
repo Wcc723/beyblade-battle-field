@@ -2,8 +2,9 @@
  * Cloudflare Worker 入口。
  *
  * 路由策略（見 wrangler.jsonc）：
- * - /api/*  → run_worker_first，一律進到這裡處理
- * - 其餘    → Workers static assets 直接出（SPA fallback 回 index.html）
+ * - /api/*           → run_worker_first，一律進到這裡處理
+ * - / 與 SPA 路由     → run_worker_first，交給 ./pages.ts（首頁依登入分流、SPA 殼加 noindex）
+ * - 其餘             → Workers static assets 直接出；不存在的路徑回 public/404.html（HTTP 404）
  *
  * 之後階段：
  * - Phase 3: /api/settings、/api/admin/*（D1 全域設定 CRUD）
@@ -12,6 +13,7 @@
  */
 import { handleLogin, handleCallback, handleLogout, isAdminEmail } from "./auth";
 import { getSession, type SessionData } from "./session";
+import { handlePage } from "./pages";
 import { handleGetConfig, handlePutAdminConfig, handleGetSettings, handlePutSettings, handleGetMatches } from "./api";
 import { genRoomCode } from "../src/game/room";
 import { autoNickname } from "../src/game/names";
@@ -203,7 +205,7 @@ export default {
       return Response.json({ error: "not_found" }, { status: 404 });
     }
 
-    // run_worker_first 只涵蓋 /api/*，理論上不會走到這裡；保險起見回退到靜態資產
-    return env.ASSETS.fetch(request);
+    // 頁面：run_worker_first 送進來的 / 與 SPA 路由（見 ./pages.ts）
+    return handlePage(request, { assets: env.ASSETS, sessionSecret: env.SESSION_SECRET });
   },
 } satisfies ExportedHandler<Env>;
