@@ -37,7 +37,7 @@ const errorMsg = computed(() =>
         <div class="split" aria-hidden="true"></div>
 
         <p class="hint">
-          免費的瀏覽器雙人線上對戰需要 Google 帳號登入（暱稱與頭像預設取自 Google，可在個人設定修改）。
+          免費的瀏覽器雙人線上對戰需要 Google 帳號登入（對戰暱稱由系統指派、可在個人設定修改，頭像取自 Google 帳號）。
         </p>
 
         <p v-if="errorMsg" class="error">
@@ -49,8 +49,18 @@ const errorMsg = computed(() =>
         </button>
 
         <p class="hint small">測試頁（測試對戰／測試手機版）不需登入。</p>
+        <!-- 整頁導航（不是 RouterLink）：未登入造訪 / 由 worker 回公開介紹頁 -->
+        <p class="hint small">登入會儲存哪些資料，請看<a href="/#privacy">資料與隱私</a>。</p>
       </div>
     </section>
+
+    <nav class="legal" aria-label="相關連結">
+      <a href="/">認識戰鬥陀螺</a>
+      <a href="https://www.pocketool.app/privacy">隱私權政策</a>
+      <a href="https://www.pocketool.app/terms">服務條款</a>
+      <a href="https://www.pocketool.app/contact">聯絡</a>
+      <a href="https://www.pocketool.app/">口袋工具</a>
+    </nav>
   </div>
 </template>
 
@@ -127,6 +137,25 @@ const errorMsg = computed(() =>
   margin-top: 14px;
   font-size: 11.5px;
   letter-spacing: 0.04em;
+}
+.hint a {
+  color: var(--accent);
+}
+
+/* ---- 頁尾連結（隱私權政策等，連到口袋工具主站） ---- */
+.legal {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 16px;
+  margin: 18px 0 0;
+  font-size: 12.5px;
+}
+.legal a {
+  color: var(--muted);
+}
+.legal a:hover {
+  color: var(--accent);
 }
 
 /* ---- 錯誤列：紅章 + 文案 ---- */
