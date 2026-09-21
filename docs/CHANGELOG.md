@@ -14,6 +14,15 @@
 
 ## [未發布 / 待辦]
 
+### 新增（公開頁與 SEO 基礎建設）
+
+- **未登入的首頁改成公開介紹頁**：`public/landing.html`（純靜態 HTML，原始 HTML 就有完整內容）說明遊戲玩法（大廳、房號、快速配對、BOT 練習、出賽陣容、瞄準發射、計分）、4 張實機截圖（含 alt）、「用 Google 登入開始對戰」CTA、資料與隱私（依 `users` / `user_settings` / `matches` 實際欄位撰寫，連到口袋工具隱私權政策）、頁尾連結（隱私權政策、服務條款、聯絡、口袋工具、口袋工具上的介紹頁）。`worker/pages.ts` 在 `/` 依 session 分流：未登入回介紹頁、已登入回 SPA 大廳，既有網址與登入流程不變。
+- **真 404**：`assets.not_found_handling` 由 `single-page-application` 改為 `404-page` + `public/404.html`；vue-router 的路由改由 `run_worker_first` 送進 worker 回 SPA 殼。以前任何網址（含 `/robots.txt`、`/sitemap.xml`）都回 200 的 index.html。
+- **robots.txt / sitemap.xml**：實體檔（`Disallow: /api/`、Sitemap 行；sitemap 只列首頁），修正 GSC「sitemap 是 HTML」錯誤。
+- **meta**：介紹頁有 canonical、description、og:url / og:description / og:image（`public/og.png` 1200×630，實機畫面合成）、`twitter:card`；SPA 殼（登入後畫面）改為 noindex（meta + `X-Robots-Tag`）、不放 canonical，保留分享卡給房間連結預覽。新增 `favicon.svg`；音效試聽室兩頁加 noindex。
+- **登入頁**：提示改成實際行為（對戰暱稱由系統指派、頭像取自 Google；舊文案寫「暱稱預設取自 Google」與程式不符），並加上隱私權政策等頁尾連結。
+- **gate**：`scripts/seo-audit.mjs` 擴充到殼／介紹頁／404／robots／sitemap／登入頁連結，並檢查 og.png 尺寸與截圖檔存在；`test/pages.test.ts` 交叉比對 `src/router.ts` × `run_worker_first` × `worker/pages.ts`。
+
 ### 修復（對外正確性）
 
 - **標題改成產品現況**：`index.html` 的 `<title>` 從「戰鬥陀螺 — 物理引擎原型」改為 **「玩戰鬥陀螺線上對戰｜免費瀏覽器雙人遊戲」**——正式站早已是可玩的線上對戰產品，舊標題是過時 metadata。同步新增**逐字相同**的 `og:title` / `twitter:title`（分享卡標題）。刻意**只加這兩個 meta**：本站是 SPA、全站共用一份 `index.html`，補 canonical 會把所有 deep route 錯誤指向 root；description / JSON-LD / sitemap 不在本輪範圍。`html lang="zh-Hant"`、GA、字型皆未動。

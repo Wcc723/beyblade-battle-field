@@ -16,8 +16,8 @@
 | --- | --- |
 | 前端框架 | Vue 3（`<script setup>`）+ TypeScript |
 | 建構工具 | Vite 6 + `@cloudflare/vite-plugin`（dev/build 內含 Worker runtime） |
-| 路由 | vue-router 4（history mode，SPA fallback） |
-| 後端 | Cloudflare Workers（`worker/index.ts` 入口，`/api/*` 走 `run_worker_first`） |
+| 路由 | vue-router 4（history mode；頁面路由由 `worker/pages.ts` 回 SPA 殼，未登入的 `/` 回公開介紹頁，其餘回真 404） |
+| 後端 | Cloudflare Workers（`worker/index.ts` 入口，`/api/*` 與頁面路由走 `run_worker_first`） |
 | 即時狀態 | Durable Objects：`BattleRoomDO`（對戰權威狀態機）+ `LobbyDO`（單一全域大廳：presence/配對/公開房） |
 | 資料庫 | Cloudflare D1（SQLite）：`users` / `user_settings` / `global_config` / `matches` 等（`migrations/`） |
 | 物件儲存 | Cloudflare R2（`SFX` bucket，音效取樣管線保留但目前未使用） |

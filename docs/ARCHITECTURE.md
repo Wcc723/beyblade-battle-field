@@ -71,7 +71,7 @@
 | `test/` | vitest 單元測試（中文名）+ `balance.bench.ts`/`balance-special.bench.ts`（平衡分析，走獨立 config）。 |
 | `scripts/` | `bot-player.mjs`（自動打整場的 BOT）、`lobby-test.mjs`（兩 token 排隊驗配對）、`upload-sfx.sh`（R2 音效上傳，目前未使用）。 |
 | `public/` | 對戰實際用的素材 `beyblades/*.webp`、`sfx-lab.html`（音色試聽室，保留）。 |
-| `wrangler.jsonc` | Cloudflare 設定（assets/SPA fallback、D1/R2/DO bindings、DO migrations）。 |
+| `wrangler.jsonc` | Cloudflare 設定（assets：404-page + 頁面 run_worker_first、D1/R2/DO bindings、DO migrations）。 |
 | `CLAUDE.md` | 最佳事實來源（平衡校準、雷區、慣例）。 |
 
 ---
@@ -142,7 +142,17 @@ npm run cf-typegen # 改 wrangler.jsonc 後重產 worker-configuration.d.ts
 
 部署前必打三個 secret（`wrangler deploy` 不會上傳 `.env`）：`GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`SESSION_SECRET`。漏打時 `/api/auth/*` 回 503 並在 log 指名缺哪個。`ADMIN_EMAILS` 是非秘密 var（在 `wrangler.jsonc`）。
 
-`wrangler.jsonc` 的 `assets`：`not_found_handling: "single-page-application"`（SPA fallback 回 index.html，配 vue-router history mode）、`run_worker_first: ["/api/*"]`（只有 `/api/*` 先進 Worker，其餘走靜態資產）。
+`wrangler.jsonc` 的 `assets`：`not_found_handling: "404-page"`（不存在的路徑回 `public/404.html`，HTTP 404）、`run_worker_first` 列 `/api/*`、`/` 與 vue-router 的每條路由（`/login`、`/roster`、`/settings`、`/room/*`、`/admin/*`、`/test/*`，含尾斜線版本）。頁面請求由 `worker/pages.ts` 處理：
+
+| 請求 | 回應 |
+| --- | --- |
+| `/`（未登入或 session 無效） | `public/landing.html`：公開介紹頁，可索引、canonical 為首頁；`Cache-Control: private, no-cache` + `Vary: Cookie` |
+| `/`（已登入） | SPA 殼 `index.html`（大廳），`X-Robots-Tag: noindex` |
+| vue-router 路由 | SPA 殼 `index.html`，`X-Robots-Tag: noindex`（殼本身也有 `<meta name="robots" content="noindex">`） |
+| `/landing` | 301 → `/`（介紹頁只在首頁提供） |
+| 其他路徑 | 資產層：實體檔照常；不存在 → `404.html`（HTTP 404） |
+
+`robots.txt`、`sitemap.xml`（只列 `/`）、`og.png` 是 `public/` 的實體檔。
 
 ---
 

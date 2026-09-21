@@ -139,8 +139,18 @@
 2. 需登入的路由：`const session = await getSession(request, env.SESSION_SECRET); if (!session) return 401;`
 3. 需管理員：放在 `/api/admin/*` 區塊（已有統一閘門 `isAdminEmail(session.email, env)` → 403）。**前端隱藏入口只是 UX，真閘門在這裡。**
 4. handler 實作放 `worker/api.ts`（不直接寫進 index）；回傳一律 `Response.json(...)`。
-5. 未匹配的 `/api/*` 落到尾端 404；非 `/api` 由 `run_worker_first` 不涵蓋 → 走 SPA fallback。
+5. 未匹配的 `/api/*` 落到尾端 404；非 `/api` 的頁面請求交給 `worker/pages.ts`（見 5.1.1「新增前端頁面路由」）。
 6. 改完 `npm run typecheck`（worker 那輪會檢查）。
+
+### 5.1.1 新增前端頁面路由
+
+資產層是 `not_found_handling: "404-page"`：沒登記的路徑一律回 404 頁。新增 vue-router 路由時三處都要改：
+
+1. `src/router.ts` 加路由。
+2. `wrangler.jsonc` 的 `assets.run_worker_first` 加路徑（含尾斜線版本，或用 `/xxx/*`）。
+3. `worker/pages.ts` 的 `SPA_ROUTES` 加對應 regex（worker 據此回 SPA 殼 + noindex）。
+
+`npm test` 的 `test/pages.test.ts` 會交叉比對三處，漏一邊就失敗。新頁面若要被搜尋引擎收錄，不能只做成 SPA 路由（殼是 noindex）：要做成像 `public/landing.html` 的靜態頁，並加進 `public/sitemap.xml` 與 `scripts/seo-audit.mjs` 的 `INDEXABLE_PATHS`。
 
 ### 5.2 新增 D1 migration
 

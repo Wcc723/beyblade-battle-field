@@ -60,7 +60,7 @@ npm run cf-typegen # wrangler types → 重新產生 worker-configuration.d.ts�
 
 頁面用 vue-router（`src/router.ts`）：`/` 大廳、`/room/:code` 對戰廳、`/settings` 個人設定、`/admin/*` 後台、`/test/battle`+`/test/mobile`＝**原單機頁面原樣保留**（繼續吃 localStorage、不受線上化影響）。
 
-Cloudflare 端：`worker/index.ts`（入口，`/api/*` 走 `run_worker_first`）+ `wrangler.jsonc`（SPA fallback）。規格細節（已拍板）：大廳＝房號+快速配對+公開房列表；全站 Google OAuth（`ADMIN_EMAILS` env var 管後台權限）；場地用管理員啟用的全域組、玩家各自選陀螺；線上設定存 D1、房間暫態在 Battle Room DO；seed 由 DO 在雙方提交後產生（防離線暴搜）；R2 第一階段不用。
+Cloudflare 端：`worker/index.ts`（入口，`/api/*` 與頁面路由走 `run_worker_first`）+ `wrangler.jsonc`（`not_found_handling: "404-page"`，見下方「公開頁與 SEO」）。規格細節（已拍板）：大廳＝房號+快速配對+公開房列表；全站 Google OAuth（`ADMIN_EMAILS` env var 管後台權限）；場地用管理員啟用的全域組、玩家各自選陀螺；線上設定存 D1、房間暫態在 Battle Room DO；seed 由 DO 在雙方提交後產生（防離線暴搜）；R2 第一階段不用。
 
 分階段：✅P1 骨架（router+worker+vite-plugin）→ ✅P2 OAuth+權限（`worker/auth.ts`+`session.ts`+`jwt.ts`、D1 `users`、`/api/me`、router 守衛；環境變數走 `.env`，見 `.env.example`）→ ✅P3 個人設定+後台搬 D1（`worker/api.ts`：`/api/config`、`/api/admin/config/:key`、`/api/settings`；D1 `global_config` key-value JSON blob + `user_settings`；`src/store/adminBackend.ts` 後台雙資料源——兩個 Admin 元件 props 注入，後台頁「🌐 線上(D1) / 💻 本機(localStorage)」切換，測試頁仍吃 localStorage）→ P4 Battle Room DO+對戰廳（以 `MobileBattle.vue` 為基底）→ P5 大廳 DO+戰績。
 
@@ -125,6 +125,14 @@ P3 雷區：遠端寫入有三道防線——arena 整包 PUT 走 **promise queu
 - 中二名稱系統 `src/game/names.ts`（零 Env，worker 與前端共用）：`autoNickname(uid)` 自動暱稱（API 讀設定時補上並持久化；風格＝日式/美式中二，暱稱清空儲存可重抽）。**名池已凍結**（test/names.test.ts checksum 12b004d0）：hash 取模選名 → 插入/刪除/重排都會讓全服名字洗牌，只准原位替換並更新 checksum。
 - 音效 `src/audio/sfx.ts`＝「街機誇張」純合成引擎（sfx-lab 試聽室 C 案）：bitcrush + pump 壓縮 + 完整響度鏈；**試聽室 `public/sfx-lab.html` 與選樣室 `public/sfx-pick.html` 保留**——選樣室逐槽試聽（現役/Lab/`public/sfx-test/` 資料夾音檔），使用者選擇存 localStorage `bb-sfx-picks`（開發套用音效前先讀這份）。R2 取樣管線（`/api/sfx/:key`、bucket `beyblade-sfx`、`scripts/upload-sfx.sh`）保留但目前未使用（取樣路線被使用者否決，留作未來混血選項）。
 - 場地震動是**容器級**（useBattle 的 `shakeEl` ref 綁場地容器 div，直接 DOM transform、振幅以顯示像素標定）——別再用 ctx.translate 只震 canvas 層（SVG 底圖不會跟著動）。
+
+## 公開頁與 SEO
+
+- **`/` 依登入分流**（`worker/pages.ts`）：未登入（含爬蟲）→ `public/landing.html`（純靜態公開介紹頁，可索引、canonical `https://beyblade.pocketool.app/`）；已登入 → SPA 殼 `index.html`（大廳）。同一網址對所有未登入訪客一視同仁，不是 cloaking。
+- **SPA 殼一律 noindex**（meta + `X-Robots-Tag`）、不放 canonical（所有 deep route 共用）。登入頁、大廳、對戰房、設定、後台、測試頁都是殼。
+- **真 404**：資產層 `not_found_handling: "404-page"` → 不存在的路徑回 `public/404.html`（HTTP 404）。代價：**新增前端路由時要同時改 `src/router.ts`、`wrangler.jsonc` 的 `run_worker_first`、`worker/pages.ts` 的 `SPA_ROUTES`**，漏一邊該路由就 404（`test/pages.test.ts` 會交叉比對擋下）。
+- `public/robots.txt`、`public/sitemap.xml`（只列 `/`）、`public/og.png`（1200×630）、`public/screens/*.webp`（介紹頁截圖）都是實體檔；契約由 `scripts/seo-audit.mjs`（postbuild）驗：標題、description、OG、canonical、介紹頁 CTA／資料與隱私／頁尾連結、截圖 alt、404、robots、sitemap。
+- 介紹頁的「資料與隱私」要跟實際登入存的資料一致（`users`、`user_settings`、`matches`）；改了登入存的欄位記得同步這段與登入頁提示。
 
 ## 容易踩的雷
 

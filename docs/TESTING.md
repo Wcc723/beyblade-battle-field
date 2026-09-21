@@ -12,9 +12,10 @@
 
 | 類別 | 檔案 | 跑法 | 性質 |
 |------|------|------|------|
-| **引擎/邏輯單元測試** | `test/*.test.ts`（9 檔） | `npm test` | 斷言式、快、CI 必過 |
+| **引擎/邏輯單元測試** | `test/*.test.ts`（10 檔） | `npm test` | 斷言式、快、CI 必過 |
 | **平衡分析** | `test/balance.bench.ts`、`test/balance-special.bench.ts` | `npm run balance` | 輸出統計 `console.log`、人工判讀、**不進 CI** |
-| **worker 邏輯** | `test/auth.test.ts`、`test/session.test.ts` | `npm test`（同上） | 跑在 node、零 `Env` 全域相依 |
+| **worker 邏輯** | `test/auth.test.ts`、`test/session.test.ts`、`test/pages.test.ts` | `npm test`（同上） | 跑在 node、零 `Env` 全域相依；`pages.test.ts` 另外交叉比對 `src/router.ts` × `wrangler.jsonc` 的 `run_worker_first` × `worker/pages.ts`（漏登記的路由會被真 404 吃掉） |
+| **SEO gate** | `scripts/seo-audit.test.mjs` + `scripts/seo-audit.mjs` | `npm run test:seo`（`npm run build` 的 postbuild 也會跑） | 殼、介紹頁、404、robots、sitemap、登入頁的契約與 mutation tests |
 
 注意：bench 檔副檔名是 `.bench.ts`，**不在 `npm test` 的 glob（`test/**/*.test.ts`）內**——這是刻意的（見 §4）。
 
